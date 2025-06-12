@@ -1,5 +1,6 @@
 <template>
-    <div class="body">
+    <div class="container">
+        <div class="body">
         <p>
             Tạo và xuất
             <span id="word1" class="word">hình ảnh</span>
@@ -50,6 +51,7 @@
             </div>
         </div>
     </footer>
+    </div>
 </template>
 
 <script>

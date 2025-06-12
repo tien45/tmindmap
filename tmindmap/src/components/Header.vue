@@ -166,7 +166,7 @@ export default {
     console.log('Using token:', token);
 
     // 2) Gọi API /profile với header Bearer
-    const res = await fetch('http://localhost:5000/profile', {
+    const res = await fetch('/profile', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -205,7 +205,7 @@ export default {
     async saveAccountInfo() {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:5000/profile', {
+        const res = await fetch('/profile', {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -272,7 +272,7 @@ export default {
     content: this.feedbackDescription
   };
 
-  fetch('http://localhost:5000/feedback', {
+  fetch('/feedback', {
     method: 'POST',
     headers: { // <-- sửa ở đây: 'headers' thay vì 'header'
       'Content-Type': 'application/json'
@@ -324,6 +324,7 @@ export default {
 header {
   height: 90px;
   width: 100%;
+  background: radial-gradient(rgb(173, 252, 252),white);
 }
 .nav {
   margin-left: 30px;

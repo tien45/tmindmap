@@ -79,25 +79,35 @@
         <div class="text-formatting">
           <h3><i class="fa-solid fa-text-height"></i> Kiểu chữ</h3>
           <div class="fomat">
-            <button class="format-btn" :class="{ active: selectedNode && selectedNode.isBold }" @click="toggleBold">
+            <button class="format-btn"
+              :class="{ active: (selectedNode && selectedNode.isBold) || (selectedLink && selectedLink.isBold) }"
+              @click="toggleBold">
               <i class="fa-solid fa-bold"></i>
             </button>
-            <button class="format-btn" :class="{ active: selectedNode && selectedNode.isItalic }" @click="toggleItalic">
+            <button class="format-btn"
+              :class="{ active: (selectedNode && selectedNode.isItalic) || (selectedLink && selectedLink.isItalic) }"
+              @click="toggleItalic">
               <i class="fa-solid fa-italic"></i>
             </button>
-            <button class="format-btn" :class="{ active: selectedNode && selectedNode.align === 'left' }"
+            <button class="format-btn"
+              :class="{ active: (selectedNode && selectedNode.align === 'left') || (selectedLink && selectedLink.align === 'start') }"
               @click="setAlign('left')">
               <i class="fa-solid fa-align-left"></i>
             </button>
-            <button class="format-btn" :class="{ active: selectedNode && selectedNode.align === 'center' }"
+            <button class="format-btn"
+              :class="{ active: (selectedNode && selectedNode.align === 'center') || (selectedLink && selectedLink.align === 'middle') }"
               @click="setAlign('center')">
               <i class="fa-solid fa-align-center"></i>
             </button>
-            <button class="format-btn" :class="{ active: selectedNode && selectedNode.align === 'right' }"
+            <button class="format-btn"
+              :class="{ active: (selectedNode && selectedNode.align === 'right') || (selectedLink && selectedLink.align === 'end') }"
               @click="setAlign('right')">
               <i class="fa-solid fa-align-right"></i>
             </button>
             <input type="color" v-model="selectedColor" @change="applyTextColor" class="color-picker" title="Màu chữ">
+            <input type="number" v-model.number="selectedFontSize" @change="applyFontSize" class="font-size-input"
+              min="6" max="72" style="width:40px; margin-left:8px; border:2px solid #ccc; border-radius: 10px;"
+              title="Kích thước chữ (px)" />
           </div>
           <select v-model="selectedFont" @change="applyFontFamily" class="style-select">
             <option value="">Font</option>
@@ -155,6 +165,7 @@
               <option value="none">Không</option>
               <option value="arrow">Mũi tên</option>
               <option value="tree">Cành cây</option>
+              <option value="radial">Radial</option>
             </select>
           </div>
         </div>
@@ -162,13 +173,13 @@
 
       <!-- Canvas -->
       <div class="canvas" ref="canvas" @click.self="clearSelection" @dragover.prevent @drop="drop($event)"
-         @wheel.prevent="onWheel"
-         :style="{
+        @wheel.prevent="onWheel" :style="{
           transform: `scale(${scale})`,
           transformOrigin: '0 0'
-        }">
-      
-        <svg class="link-canvas" ref="canva">
+        }" tabindex="0" @keydown.ctrl.c.prevent="copyNode" @keydown.ctrl.v.prevent="pasteNode">
+
+        <svg class="link-canvas" ref="canva" xmlns="http://www.w3.org/2000/svg"
+          xmlns:xlink="http://www.w3.org/1999/xlink">
           <defs>
             <!-- Marker mũi tên (arrow) -->
             <marker id="arrow" markerUnits="strokeWidth" markerWidth="6" markerHeight="6" refX="6" refY="3"
@@ -179,9 +190,13 @@
 
           <!-- 1 vòng lặp duy nhất qua tất cả links -->
           <g v-for="(link, i) in links" :key="i" @click.stop="handleLinkClick(link)">
+
             <!-- A) Tree mode: vẽ gốc circle to + thân mảnh -->
             <path v-if="link.marker === 'tree'" @click.stop="selectLink(link)" :d="computeTaperedBranch(link)"
               :fill="link.color" :class="{ 'link--selected': link === selectedLink }" />
+            <path v-else-if="link.marker === 'radial'" @click.stop="selectLink(link)" :id="`linkPath-${i}`"
+              :d="computeRadialLinkPath(link) || link.path" :stroke="link.color" :stroke-width="link.thickness"
+              fill="none" :class="{ 'link--selected': link === selectedLink }" />
             <!-- C) Node→free-pos -->
             <path @click.stop="selectLink(link)"
               v-else-if="getLinkPath(link.from, link.toPos || link.to, !!link.toPos, link.curvature)"
@@ -191,7 +206,7 @@
             <circle v-if="link === selectedLink && link.toPos" :cx="link.toPos.x" :cy="link.toPos.y" r="6"
               style="cursor:move; pointer-events:all;" @mousedown.stop.prevent="startDragEnd(link, $event)" />
             <!-- B) Regular mode: node→node straight or curved, arrow/none -->
-            <line v-else-if="!link.toPos && link.curvature === 0" :x1="getNodeCenter(link.from).x"
+            <path v-else-if="!link.toPos && link.curvature === 0" :x1="getNodeCenter(link.from).x"
               :y1="getNodeCenter(link.from).y" :x2="getNodeCenter(link.to).x" :y2="getNodeCenter(link.to).y"
               :stroke="link.color" :stroke-width="link.thickness" :stroke-dasharray="dashArray(link.dash)"
               :marker-end="link.marker === 'none' ? null : `url(#${link.marker})`" fill="none"
@@ -204,6 +219,28 @@
             <circle v-if="link === selectedLink" :cx="midPoint(link).x" :cy="midPoint(link).y" r="6" fill="white"
               stroke="gray" stroke-width="1" style="pointer-events: all; cursor: move;"
               @mousedown.prevent="startAdjustCurvature(link, $event)" />
+            <text v-if="link.marker === 'radial'" font-size="12" fill="#333" @dblclick.stop.prevent="startEditing(i)"
+              style="pointer-events: all; cursor: text;">
+              <textPath :xlink:href="`#linkPath-${i}`" startOffset="65%" :text-anchor="link.align"
+                :font-weight="link.isBold ? 'bold' : 'normal'" :font-style="link.isItalic ? 'italic' : 'normal'"
+                :fill="link.textColor" :font-family="link.fontFamily" :font-size="`${link.fontSize}px`">
+                {{ link.text || 'Nhập nhãn...' }}
+              </textPath>
+            </text>
+            <foreignObject v-if="editingIndex === i" :x="inputX" :y="inputY" width="120" height="24">
+              <input xmlns="http://www.w3.org/1999/xhtml" type="text" v-model="tempText"
+                @keydown.enter.prevent="finishEditing(i)" @blur="finishEditing(i)" ref="editableInput" style="
+                  font-size:12px;
+                  padding:4px;
+                  border:1px solid #2196f3;
+                  background:#fff;
+                  border-radius:4px;
+                  width:100%;
+                  height:100%;
+                  box-sizing:border-box;
+                " />
+            </foreignObject>
+
           </g>
           <line v-if="linking.active && linking.fromNode" :x1="getNodeCenter(linking.fromNode.id).x"
             :y1="getNodeCenter(linking.fromNode.id).y" :x2="linking.tempPos.x" :y2="linking.tempPos.y" stroke="#999"
@@ -301,6 +338,7 @@ export default {
       customColor1: false,
       selectedFont: '',
       selectedColor: '#000000',
+      selectedFontSize: 12,
       selectedAlign: 'center',
       defaultNodeBorderColor: '#333333',
       defaultNodeBackgroundColor: '#ffffff',
@@ -327,61 +365,65 @@ export default {
       rotateStartAngle: 0,
       rotateCenter: { x: 0, y: 0 },
       svg: null,
+      inputX: 0,
+      inputY: 0,
+      editingIndex: null,       // index (i) của link đang edit
+      tempText: '',
     }
   },
   async mounted() {
-  // 1) khởi tạo SVG reference
-  this.svg = d3.select(this.$refs.canva);
+    // 1) khởi tạo SVG reference
+    this.svg = d3.select(this.$refs.canvas);
 
-  // 2) fetch data
-  const { id } = this.$route.params;
-  if (!id) return;
-  this.loading = true;
-  try {
-    const resp = await fetch(
-      `http://localhost:5000/api/listMindmap/${id}`,
-      { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-    );
-    const result = await resp.json();
-    const item = result.item ?? result.data ?? result.payload ?? result;
-    this.form.mapTitle = item.title;
-    const mapType = item.mapType ?? item.type;
-    let rawData = (mapType === 'manual' || mapType === 'free')
-      ? item.manualData
-      : item.mindmapData;
-    if (typeof rawData === 'string') rawData = JSON.parse(rawData);
+    // 2) fetch data
+    const { id } = this.$route.params;
+    if (!id) return;
+    this.loading = true;
+    try {
+      const resp = await fetch(
+        `/api/listMindmap/${id}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      const result = await resp.json();
+      const item = result.item ?? result.data ?? result.payload ?? result;
+      this.form.mapTitle = item.title;
+      const mapType = item.mapType ?? item.type;
+      let rawData = (mapType === 'manual' || mapType === 'free')
+        ? item.manualData
+        : item.mindmapData;
+      if (typeof rawData === 'string') rawData = JSON.parse(rawData);
 
-    // 3) map lại nodes để thêm left/top, gán vào state
-    this.nodes = (rawData.nodes || []).map(n => ({
-      ...n,
-      left: n.x,   // CSS của Vue template dùng left/top
-      top:  n.y,
-    }));
-    this.links = rawData.links || [];
+      // 3) map lại nodes để thêm left/top, gán vào state
+      this.nodes = (rawData.nodes || []).map(n => ({
+        ...n,
+        left: n.x,   // CSS của Vue template dùng left/top
+        top: n.y,
+      }));
+      this.links = rawData.links || [];
 
-    // 4) nếu manual, sanitize text
-    if (mapType === 'manual') {
-      this.nodes.forEach(n => {
-        n.text = String(n.text).replace(/<[^>]+>/g, '');
+      // 4) nếu manual, sanitize text
+      if (mapType === 'manual') {
+        this.nodes.forEach(n => {
+          n.text = String(n.text).replace(/<[^>]+>/g, '');
+        });
+      }
+
+      this.selectedMapType = mapType;
+      this.mindmapObject = rawData;
+
+      // 5) chờ Vue render rồi vẽ D3 cho links
+      this.$nextTick(() => {
+        this.drawMindMap(this.svg);
+        this.initSelection && this.initSelection();
       });
+
+    } catch (e) {
+      console.error(e);
+      this.error = e.message;
+    } finally {
+      this.loading = false;
     }
-
-    this.selectedMapType = mapType;
-    this.mindmapObject = rawData;
-
-    // 5) chờ Vue render rồi vẽ D3 cho links
-    this.$nextTick(() => {
-      this.drawMindMap(this.svg);
-      this.initSelection && this.initSelection();
-    });
-
-  } catch (e) {
-    console.error(e);
-    this.error = e.message;
-  } finally {
-    this.loading = false;
-  }
-},
+  },
 
 
   computed: {
@@ -520,6 +562,79 @@ export default {
     }
   },
   methods: {
+    copyNode() {
+      if (!this.selectedNode) return;
+      // deep clone: loại bỏ reactivity, nếu node có nested object
+      this.clipboardNode = JSON.parse(JSON.stringify(this.selectedNode));
+      // xóa id cũ để tạo id mới lúc paste
+      delete this.clipboardNode.id;
+      console.log('Copied', this.clipboardNode);
+    },
+    // 3. Paste node vào canvas
+    pasteNode() {
+      if (!this.clipboardNode) return;
+      // clone lại lần nữa để tránh sửa chính clipboard
+      const newNode = JSON.parse(JSON.stringify(this.clipboardNode));
+      // gán id mới (ví dụ timestamp hoặc uuid)
+      newNode.id = Date.now();
+      // offset vị trí để không đè lên node cũ
+      newNode.left += 20;
+      newNode.top += 20;
+      // thêm vào mảng nodes
+      this.nodes.push(newNode);
+      // chọn luôn node vừa paste
+      this.selectedNode = newNode;
+      console.log('Pasted', newNode);
+    },
+    startEditing(i) {
+      console.log("👉 startEditing với index =", i);
+      // Đợi Vue render <text> + <path> xong
+      this.$nextTick(() => {
+        // Tìm path đã vẽ có id="linkPath-i"
+        const pathEl = document.getElementById(`linkPath-${i}`);
+        if (!pathEl) {
+          console.warn("Không tìm thấy path với id linkPath-" + i);
+          return;
+        }
+        // Tính điểm midpoint trên path
+        const totalLen = pathEl.getTotalLength();
+        const midPt = pathEl.getPointAtLength(totalLen * 0.5);
+
+        // Căn giữa khung <input> (width=120, height=24)
+        this.inputX = midPt.x - 60;  // 120/2 = 60
+        this.inputY = midPt.y - 12;  // 24/2 = 12
+
+        // Gán biến để hiển <foreignObject>
+        this.editingIndex = i;
+
+        // Copy text cũ (nếu có) vào tempText để input hiển sẵn
+        this.tempText = this.links[i].text || '';
+
+        // Sau khi <foreignObject> xuất hiện, focus vào <input>
+        this.$nextTick(() => {
+          const allInputs = this.$refs.editableInput;
+          const target = Array.isArray(allInputs) ? allInputs[0] : allInputs;
+          if (target) {
+            target.focus();
+            // Đặt caret (con trỏ) về cuối chuỗi
+            const len = target.value.length;
+            target.setSelectionRange(len, len);
+          }
+        });
+      });
+    },
+
+    // Khi user nhấn Enter hoặc blur khỏi <input>
+    finishEditing(i) {
+      console.log("✍️ finishEditing với index =", i, "giá trị mới:", this.tempText);
+      // Gán giá trị mới vào mảng links
+      this.links[i].text = this.tempText.trim();
+      // Ẩn <foreignObject>
+      this.editingIndex = null;
+      // Reset tempText để lần sau không bị vướng
+      this.tempText = '';
+    },
+
     startRotate(node, event) {
       this.selectedNode = node;
       this.rotatingNode = node;
@@ -690,135 +805,151 @@ export default {
 
     // Hàm gọi fetch
     async _postSaveManual() {
-  const title = this.form.mapTitle.trim();
-  if (!title) return alert('Nhập tên sơ đồ tư duy');
+      const title = this.form.mapTitle.trim();
+      if (!title) return alert('Nhập tên sơ đồ tư duy');
 
-  // 1) Phân biệt POST / PUT
-  const id       = this.$route.params.id;
-  console.log('id',id)
-  const isUpdate = Boolean(id);
-  const url      = isUpdate
-    ? `http://localhost:5000/api/listMindmap/${id}`
-    : 'http://localhost:5000/api/listMindmap';
-  const method   = isUpdate ? 'PUT' : 'POST';
+      // 1) Phân biệt POST / PUT
+      const id = this.$route.params.id;
+      console.log('id', id)
+      const isUpdate = Boolean(id);
+      const url = isUpdate
+        ? `/api/listMindmap/${id}`
+        : '/api/listMindmap';
+      const method = isUpdate ? 'PUT' : 'POST';
 
-  this.loading = true;
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) throw new Error('Chưa có token');
+      this.loading = true;
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Chưa có token');
 
-    // 2) Xuất SVG + thumbnail
-    const svgMarkup = this._exportSvgMarkup();
-    const imageUrl  = await this._generateImageFromSvg(900);
+        // 2) Xuất SVG + thumbnail
+        const svgMarkup = this._exportSvgMarkup();
+        const imageUrl = await this._generateImageFromSvg(900);
 
-    // 3) Chuẩn hóa manualData.nodes
-    const manualNodes = this.nodes.map(node => ({
-      id: node.id,
-      type: node.type,
-      x: node.left,
-      y: node.top,
-      width: node.width,
-      height: node.height,
-      text: node.text,
-      fontFamily: node.fontFamily,
-      fontSize: node.fontSize,
-      isBold: node.isBold,
-      isItalic: node.isItalic,
-      textColor: node.textColor,
-      align: node.align,
-      borderColor: node.borderColor,
-      borderWidth: node.borderWidth,
-      borderStyle: node.borderStyle,
-      backgroundColor: node.backgroundColor,
-      imageUrl: node.imageUrl,
-      rotation: node.rotation
-    }));
+        // 3) Chuẩn hóa manualData.nodes
+        const manualNodes = this.nodes.map(node => ({
+          id: node.id,
+          type: node.type,
+          x: node.left,
+          y: node.top,
+          width: node.width,
+          height: node.height,
+          text: node.text,
+          fontFamily: node.fontFamily,
+          fontSize: node.fontSize,
+          isBold: node.isBold,
+          isItalic: node.isItalic,
+          textColor: node.textColor,
+          align: node.align,
+          borderColor: node.borderColor,
+          borderWidth: node.borderWidth,
+          borderStyle: node.borderStyle,
+          backgroundColor: node.backgroundColor,
+          imageUrl: node.imageUrl,
+          rotation: node.rotation
+        }));
 
-    // 4) Chuẩn hóa manualData.links
-    const manualLinks = this.links.map(link => {
-  // Nếu link đã nối vào node khác (link.attachedTo != null), thì xóa toPos
-  if (link.attachedTo != null) {
-    return {
-      id:    link.id || `${link.from}-${link.attachedTo}`,
-      from:  link.from,
-      to:    link.attachedTo || link.to,  // dùng `attachedTo` làm `to`
-      toPos: null,             // reset free‐pos
-      color:     link.color,
-      thickness: link.thickness,
-      dash:      link.dash,
-      curvature: link.curvature,
-      marker:    link.marker,
-      custom:    link.custom
-    };
-  }
+        // 4) Chuẩn hóa manualData.links
+        const manualLinks = this.links.map(link => {
+          // Nếu link đã nối vào node khác (link.attachedTo != null), thì xóa toPos
+          if (link.attachedTo != null) {
+            return {
+              id: link.id || `${link.from}-${link.attachedTo}`,
+              from: link.from,
+              to: link.attachedTo || link.to,  // dùng `attachedTo` làm `to`
+              toPos: null,             // reset free‐pos
+              color: link.color,
+              thickness: link.thickness,
+              dash: link.dash,
+              curvature: link.curvature,
+              marker: link.marker,
+              custom: link.custom,
+              path: link.path || this.computeLinkPath(link),
+              text: link.text,
+              fontFamily: link.fontFamily,
+              fontSize: link.fontSize,
+              isBold: link.isBold,
+              isItalic: link.isItalic,
+              textColor: link.textColor,
+              align: link.align
+            };
+          }
 
-  // Còn nếu là free‐link (không gắn tới node), giữ nguyên toPos
-    return {
-      id:    link.id || `${link.from}-free`,
-      from:  link.from,
-      to:    null,
-      toPos: link.toPos ? { x: link.toPos.x, y: link.toPos.y } : undefined,
-      color:     link.color,
-      thickness: link.thickness,
-      dash:      link.dash,
-      curvature: link.curvature,
-      marker:    link.marker,
-      custom:    link.custom
-    };
-  });
+          // Còn nếu là free‐link (không gắn tới node), giữ nguyên toPos
+          return {
+            id: link.id || `${link.from}-free`,
+            from: link.from,
+            to: null,
+            toPos: link.toPos ? { x: link.toPos.x, y: link.toPos.y } : undefined,
+            color: link.color,
+            thickness: link.thickness,
+            dash: link.dash,
+            curvature: link.curvature,
+            marker: link.marker,
+            custom: link.custom,
+            path: link.path || this.computeLinkPath(link),
+            text: link.text,
+            fontFamily: link.fontFamily,
+            fontSize: link.fontSize,
+            isBold: link.isBold,
+            isItalic: link.isItalic,
+            textColor: link.textColor,
+            align: link.align
+          };
+        });
 
-    // 5) Build payload (có thêm title, type, mapType)
-    const payload = {
-      title,
-      type: 'manual',
-      mapType: 'free',
-      svgMarkup,
-      imageUrl,
-      manualData: {
-        nodes: manualNodes,
-        links: manualLinks
+        // 5) Build payload (có thêm title, type, mapType)
+        const payload = {
+          title,
+          type: 'manual',
+          mapType: 'free',
+          svgMarkup,
+          imageUrl,
+          manualData: {
+            nodes: manualNodes,
+            links: manualLinks
+          }
+        };
+
+        console.log('PAYLOAD:', payload);
+
+        // 6) Gọi API
+        const resp = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+          throw new Error(data.message || 'Lưu thất bại');
+        }
+
+        alert(isUpdate ? 'Cập nhật thành công!' : 'Lưu thành công!');
+
+        // 7) Nếu là cập nhật, đè lại nodes/links từ server (tuỳ bạn có cần)
+        if (isUpdate && data.manualData) {
+          this.nodes = data.manualData.nodes.map(n => ({
+            ...n,
+            left: n.x,
+            top: n.y
+          }));
+          this.links = data.manualData.links;
+        }
+
+        this.closeModal();
       }
-    };
-
-    console.log('PAYLOAD:', payload);
-
-    // 6) Gọi API
-    const resp = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.message || 'Lưu thất bại');
-    }
-
-    alert(isUpdate ? 'Cập nhật thành công!' : 'Lưu thành công!');
-
-    // 7) Nếu là cập nhật, đè lại nodes/links từ server (tuỳ bạn có cần)
-    if (isUpdate && data.manualData) {
-      this.nodes = data.manualData.nodes.map(n => ({
-        ...n,
-        left: n.x,
-        top: n.y
-      }));
-      this.links = data.manualData.links;
-    }
-
-    this.closeModal();
-  }
-  catch (e) {
-    console.error(e);
-    alert('Lỗi khi lưu: ' + e.message);
-  }
-  finally {
-    this.loading = false;
-  }
-},
+      catch (e) {
+        console.error(e);
+        alert('Lỗi khi lưu: ' + e.message);
+      }
+      finally {
+        this.loading = false;
+      }
+    },
 
     drawMindMap() {
       const svg = d3.select(this.$refs.canva);
@@ -843,116 +974,194 @@ export default {
       return nodes.find(n => n.id === id) || { x: 0, y: 0 };
     },
     drawTreeMap(svg, treeData) {
-      const vm = this;
+      if (!treeData) return;
+
+      // 1) Normalize dữ liệu
+      let hierarchicalData;
+      if (treeData.root !== undefined && Array.isArray(treeData.branches)) {
+        hierarchicalData = {
+          id: 'root',
+          name: typeof treeData.root === 'string' ? treeData.root : '',
+          children: treeData.branches.map(br => ({
+            id: `b:${br.title}`,
+            name: typeof br.title === 'string' ? br.title : '',
+            children: Array.isArray(br.subBranches)
+              ? br.subBranches.map(sb => ({
+                id: `b:${br.title}|s:${sb}`,
+                name: typeof sb === 'string' ? sb : '',
+                children: []
+              }))
+              : []
+          }))
+        };
+      } else {
+        hierarchicalData = treeData;
+      }
+
+      // 2) Lấy kích thước SVG & tâm
       const w = svg.node().clientWidth;
       const h = svg.node().clientHeight;
+      const cx = w / 2;
+      const cy = h / 4;
+      // bán kính tối đa mà cluster sẽ vẽ (phần yOffset tối đa)
       const radius = Math.min(w, h) / 2 - 80;
       const padH = 12;
-      const linkDur = 800;
-      const zoomMin = 0.5, zoomMax = 3;
 
-      // 1) Create group
-      const g = svg.append('g')
-        .attr('transform', `translate(${w / 2},${h / 2}) rotate(0)`);
-
-      // 2) Zoom & pan
-      svg.call(
-        d3.zoom().scaleExtent([zoomMin, zoomMax])
-          .on('zoom', ({ transform }) => g.attr('transform', transform))
-      );
-
-      // 3) Build + cluster
-      const root = this.buildHierarchy(treeData);
+      // 3) D3‐hierarchy + cluster
+      const root = d3.hierarchy(hierarchicalData, d => d.children || []);
       d3.cluster().size([2 * Math.PI, radius])(root);
 
-      // 4) Compute offsets
-      root.each(d => {
-        d.yOffset = d.depth === 0 ? 0 : d.parent.yOffset + vm.textWidth(d.data.name) + padH;
+      // 4) Tính yOffset theo depth
+      //    → Thêm extraLength cho tất cả node depth >= 1
+      const extraLength = 80; // số pixel muốn kéo dài thêm cho mọi link
+      root.descendants()
+        .sort((a, b) => a.depth - b.depth)
+        .forEach(d => {
+          if (d.depth === 0) {
+            d.yOffset = 0;
+          } else {
+            const parentOffset = typeof d.parent.yOffset === 'number'
+              ? d.parent.yOffset
+              : 0;
+            // yOffset căn bản = offset của parent + width(text) + padH
+            let baseOffset = parentOffset + this.textWidth(d.data.name || '') + padH;
+
+            // Nếu node depth >= 1, cộng thêm extraLength
+            baseOffset += extraLength;
+
+            d.yOffset = baseOffset;
+          }
+        });
+
+      // 5) Build newNodes và gán this.nodes
+      //    → Chỉ vẽ circle cho node depth === 0 (root), bỏ qua node depth > 0
+      const newNodes = [];
+      root.descendants().forEach(d3node => {
+        if (d3node.depth !== 0) {
+          return; // bỏ qua tất cả node con
+        }
+
+        // Với d3node.depth === 0 (root), tính rDyn và tọa độ giống cũ
+        const name = d3node.data.name || '';
+        const words = name.split(/\s+/);
+        const lines = [];
+        for (let i = 0; i < words.length; i += 3) {
+          lines.push(words.slice(i, i + 3).join(' '));
+        }
+        const fontSize = 16; // font size cho root cố định
+        const maxW = lines.length
+          ? Math.max(...lines.map(l => this.textWidth(l, `${fontSize}px Arial`)))
+          : 0;
+        const rMin = 50;      // bán kính tối thiểu cho root
+        const rDyn = Math.max(rMin, maxW / 2 + padH);
+
+        // Tính tọa độ của root
+        const theta = (typeof d3node.x === 'number' ? d3node.x : 0) - Math.PI / 2;
+        const r = typeof d3node.yOffset === 'number' ? d3node.yOffset : 0;
+        const xCenter = cx + r * Math.cos(theta);
+        const yCenter = cy + r * Math.sin(theta);
+
+        const data = d3node.data;
+        const bg = data.backgroundColor || '#ffffff';
+        const bc = data.borderColor || '#333333';
+        const bw = data.borderWidth != null ? data.borderWidth : 2;
+        const bs = data.borderStyle || 'solid';
+        const tc = data.textColor || '#000000';
+        const ff = data.fontFamily || 'Arial';
+        const ib = true;                     // root luôn in đậm
+        const ii = !!data.isItalic;
+        const iu = data.imageUrl || null;
+
+        newNodes.push({
+          id: data.id,
+          type: 'circle',
+          top: isNaN(yCenter - rDyn + 30) ? cy - rDyn + 30 : yCenter - rDyn + 30,
+          left: isNaN(xCenter - rDyn + 5) ? cx - rDyn + 5 : xCenter - rDyn + 5,
+          width: isNaN(rDyn * 1.5) ? 0 : rDyn * 1.5,
+          height: isNaN(rDyn) ? 0 : rDyn,
+          rotation: 0,
+          text: name,     // bạn có thể để trống ('') nếu không muốn hiển thị text cho root
+          fontFamily: ff,
+          fontSize: fontSize,
+          isBold: ib,
+          isItalic: ii,
+          textColor: tc,
+          align: 'center',
+          borderColor: bc,
+          backgroundColor: bg,
+          borderWidth: bw,
+          borderStyle: bs,
+          imageUrl: iu
+        });
       });
+      this.nodes = newNodes;
 
-      // 5) Draw links
-      const linkGen = d3.linkRadial().angle(d => d.x).radius(d => d.yOffset);
-      g.append('g').selectAll('path')
-        .data(root.links()).enter().append('path')
-        .attr('class', 'link')
-        .style('cursor', 'pointer')
-        .style('pointer-events', 'all')
-        .attr('id', (d, i) => `link${i}`)
-        .attr('d', d => {
-          const base = linkGen(d);
-          const θ = d.target.x - Math.PI / 2;
-          const r = d.target.yOffset;
-          const ext = vm.textWidth(d.target.data.name) + padH;
-          const x3 = (r + ext) * Math.cos(θ);
-          const y3 = (r + ext) * Math.sin(θ);
-          return `${base}L${x3},${y3}`;
-        })
-        .attr('fill', 'none')
-        .attr('stroke', 'aqua')
-        .attr('stroke-width', d => d.source.depth === 0 ? 8 : 2)
-        .style('stroke-dasharray', vm.linkDash === 'dashed' ? '4,2' : vm.linkDash === 'dotted' ? '1,2' : null)
-        .attr('stroke-dashoffset', function () { return this.getTotalLength(); })
-        .on('click', (event, d) => {
-          event.stopPropagation();
-          vm.selectedLink = d;           // chọn link
-        })
-        .transition().duration(linkDur).ease(d3.easeCubicOut)
-        .attr('stroke-dashoffset', 0)
-        .on('end', () => { vm.creatingTopic = ''; });
+      // 6) Build newLinks và gán this.links
+      //    → Độ dày (thickness) giữ nguyên: 8px cho link cấp 1, 2px cho link cấp >1
+      //    → text: tên của node đích
+      const linkGen = d3.linkRadial()
+        .angle(d => (typeof d.x === 'number' ? d.x : 0))
+        .radius(d => (typeof d.yOffset === 'number' ? d.yOffset : 0));
 
-      // 6) Text on paths
-      g.append('g').selectAll('text')
-        .data(root.links()).enter().append('text')
-        .append('textPath')
-        .attr('href', (d, i) => `#link${i}`)
-        .attr('xlink:href', (d, i) => `#link${i}`)
-        .attr('startOffset', d => d.target.depth === 1 ? '35%' : '50%')
-        .style('font-size', d => d.target.depth === 1 ? '14px' : '10px')
-        .style('fill', d => d.target.data.textColor)
-        .style('cursor', 'pointer')
-        .style('pointer-events', 'all')
-        .text(d => d.target.data.name)
-        .on('click', (event, d) => {
-          event.stopPropagation();
-          vm.selectedNode = d.target.data;
-        });
+      const newLinks = root.links().map((d3link, idx) => {
+        // 6a) Tạo path radial gốc (d3-format)
+        let basePath = '';
+        try {
+          basePath = linkGen(d3link) || '';
+        } catch {
+          basePath = '';
+        }
 
-      // 7) Root node
-      const label = root.data.name;
-      const wTxt = vm.textWidth(label);
-      const rootG = g.append('g').attr('class', 'node-group')
-        .attr('data-id', root.data.id)
-        .attr('transform', 'translate(0,20)')
-        .style('pointer-events', 'all')
-        .style('cursor', 'pointer')
-        .on('click', e => { e.stopPropagation(); vm.selectedNode = root.data; });
-      const rootNode = rootG.append('g')
-        .call(d3.drag().on('drag', event => {
-          const t = d3.zoomTransform(svg.node());
-          const x0 = t.x, y0 = t.y;
-          rootG.attr('transform', `translate(${x0 + event.dx},${y0 + event.dy})`);
-        }));
-      rootNode.append('ellipse')
-        .attr('rx', wTxt / 2 + padH)
-        .attr('ry', padH + 7)
-        .attr('fill', root.data.backgroundColor)
-        .attr('stroke', root.data.borderColor)
-        .attr('stroke-width', root.data.borderWidth)
-        .style('stroke-dasharray', root.data.borderStyle === 'dashed' ? '4,2' : root.data.borderStyle === 'dotted' ? '1,2' : null);
-      rootNode.append('text')
-        .text(label)
-        .attr('text-anchor', 'middle')
-        .attr('dy', '0.35em')
-        .style('font-size', '14px')
-        .style('font-weight', 'bold')
-        .style('fill', root.data.textColor)
-        .style('cursor', 'pointer')
-        .style('pointer-events', 'all')
-        .on('click', (event) => {
-          event.stopPropagation();
-          vm.selectedNode = root.data;       // chọn root node
-        });
+        // 6b) Chuyển sang toạ độ tuyệt đối (cộng cx, cy)
+        let absolutePath = '';
+        if (basePath) {
+          absolutePath = basePath.replace(
+            /(-?\d+(\.\d+)?),(-?\d+(\.\d+)?)/g,
+            (_, x, __, y) => {
+              const xi = parseFloat(x);
+              const yi = parseFloat(y);
+              if (isNaN(xi) || isNaN(yi)) {
+                return `${cx},${cy}`;
+              }
+              return `${xi + cx},${yi + cy}`;
+            }
+          );
+        }
+
+        // 6c) Xác định độ dày
+        const isLevel1 = (d3link.source.depth === 0 && d3link.target.depth === 1);
+        const thicknessValue = isLevel1
+          ? 8   // giữ 8px cho level 1
+          : (d3link.source.depth === 0 ? 8 : 2);
+
+        return {
+          id: `link-${idx}`,
+          from: d3link.source.data.id,
+          to: d3link.target.data.id,
+          color: 'aqua',
+          thickness: thicknessValue,
+          dash: this.linkDash || [],
+          marker: 'radial',
+          path: absolutePath,
+          text: d3link.target.data.name || '', // Nội dung chữ dọc theo link
+          fontSize: isLevel1 ? 14 : 12,
+          textColor: '#333',
+          fontFamily: 'Arial',
+          isBold: isLevel1,
+          isItalic: false,
+          align: 'middle'
+        };
+      });
+      this.links = newLinks;
+
+      // 7) Reset selection
+      this.selectedNode = null;
+      this.selectedLink = null;
+
+      // 8) Xóa SVG cũ để Vue re‐render lại
+      svg.selectAll('*').remove();
     },
+
     wrapText(textSel, maxWidth, lineHeight = 1.2) {
       textSel.each(function () {
         const text = d3.select(this);
@@ -996,228 +1205,261 @@ export default {
       return lines;
     },
     drawBubbleMap(svg, treeData) {
-    if (!treeData || !treeData.root) {
-      console.error('Invalid treeData!', treeData);
-      return;
-    }
-    const vm = this;
+      if (!treeData || !treeData.root) {
+        console.error('Invalid treeData!', treeData);
+        return;
+      }
+      const vm = this;
 
-    // --- Build plain JS tree với .name, .id, .children ---
-    const rootObj = {
-      id:   'root',
-      name: treeData.root,
-      children: treeData.branches.map(br => ({
-        id:       `b:${br.title}`,
-        name:     br.title,
-        children: br.subBranches.map(sb => ({
-          id:   `b:${br.title}|s:${sb}`,
-          name: sb
+      // --- Build plain JS tree với .name, .id, .children ---
+      const rootObj = {
+        id: 'root',
+        name: treeData.root,
+        children: treeData.branches.map(br => ({
+          id: `b:${br.title}`,
+          name: br.title,
+          children: br.subBranches.map(sb => ({
+            id: `b:${br.title}|s:${sb}`,
+            name: sb
+          }))
         }))
-      }))
-    };
-    const root = d3.hierarchy(rootObj, d => d.children || []);
+      };
+      const root = d3.hierarchy(rootObj, d => d.children || []);
 
-    // --- Layout đệ quy tính x,y,rDyn,fontSize, style defaults ---
-    const w = svg.node().clientWidth, h = svg.node().clientHeight;
-    const cx = w/2, cy = h/2;
-    const padH = 8, linkLen1 = 120, linkLen2Base = 60, extraLeaf = 60;
-    function layout(node, x, y, depth, baseAngle) {
-      // tách chữ, tính rDyn, fontSize...
-      const words = node.data.name.split(/\s+/);
-      const lines = [];
-      for (let i=0; i<words.length; i+=3)
-        lines.push(words.slice(i,i+3).join(' '));
-      const fontSize = depth===0?14: depth===1?12:10;
-      const font = `${fontSize}px sans-serif`;
-      const maxW = Math.max(...lines.map(l=>vm.textWidth(l,font)));
-      const rDyn = Math.max(depth===0?80:40, maxW/2 + padH);
+      // --- Layout đệ quy tính x,y,rDyn,fontSize, style defaults ---
+      const w = svg.node().clientWidth, h = svg.node().clientHeight;
+      const cx = w / 2, cy = h / 4;
+      const padH = 8, linkLen1 = 120, linkLen2Base = 60, extraLeaf = 60;
+      function layout(node, x, y, depth, baseAngle) {
+        // tách chữ, tính rDyn, fontSize...
+        const words = node.data.name.split(/\s+/);
+        const lines = [];
+        for (let i = 0; i < words.length; i += 3)
+          lines.push(words.slice(i, i + 3).join(' '));
+        const fontSize = depth === 0 ? 14 : depth === 1 ? 12 : 10;
+        const font = `${fontSize}px sans-serif`;
+        const maxW = Math.max(...lines.map(l => vm.textWidth(l, font)));
+        const rDyn = Math.max(depth === 0 ? 80 : 40, maxW / 2 + padH);
 
-      // gán tọa độ + style mặc định
-      node.data.x = x;
-      node.data.y = y;
-      node.data.rDyn = rDyn;
-      node.data.fontSize = fontSize;
-      node.data.fill            ||= depth===0?'aqua':'#fff';
-      node.data.stroke          ||= depth===0?'#333':'#007bff';
-      node.data.strokeWidth     ||= depth===0?2:1.5;
-      node.data.textColor       ||= '#000';
-      node.data.fontFamily      ||= 'sans-serif';
-      node.data.isBold          = !!node.data.isBold;
-      node.data.isItalic        = !!node.data.isItalic;
-      node.data.borderColor     ||= node.data.stroke;
-      node.data.borderWidth     ||= node.data.strokeWidth;
-      node.data.borderStyle     ||= 'solid';
-      node.data.backgroundColor ||= node.data.fill;
+        // gán tọa độ + style mặc định
+        node.data.x = x;
+        node.data.y = y;
+        node.data.rDyn = rDyn;
+        node.data.fontSize = fontSize;
+        node.data.fill ||= depth === 0 ? 'aqua' : '#fff';
+        node.data.stroke ||= depth === 0 ? '#333' : '#007bff';
+        node.data.strokeWidth ||= depth === 0 ? 2 : 1.5;
+        node.data.textColor ||= '#000';
+        node.data.fontFamily ||= 'sans-serif';
+        node.data.isBold = !!node.data.isBold;
+        node.data.isItalic = !!node.data.isItalic;
+        node.data.borderColor ||= node.data.stroke;
+        node.data.borderWidth ||= node.data.strokeWidth;
+        node.data.borderStyle ||= 'solid';
+        node.data.backgroundColor ||= node.data.fill;
 
-      // layout con
-      const kids = node.children||[];
-      if (!kids.length) return;
-      const Nroot = root.children.length;
-      const radSector = 2*Math.PI/Nroot;
+        // layout con
+        const kids = node.children || [];
+        if (!kids.length) return;
+        const Nroot = root.children.length;
+        const radSector = 2 * Math.PI / Nroot;
 
-      if (depth===0) {
-        kids.forEach((kid,i) => {
-          const θ = -Math.PI/2 + radSector/2 + i*radSector;
-          const len = linkLen1;
-          layout(kid, x + Math.cos(θ)*(rDyn+len), y + Math.sin(θ)*(rDyn+len), 1, θ);
-        });
-      } else {
-        const startAng = baseAngle - radSector/2;
-        kids.forEach((kid,i) => {
-          const θ = startAng + radSector*(i/((kids.length-1)||1));
-          let len = linkLen2Base + (kids.length-1)*20;
-          if (!kid.children?.length) len += extraLeaf;
-          layout(kid, x + Math.cos(θ)*(rDyn+len), y + Math.sin(θ)*(rDyn+len), depth+1, θ);
-        });
+        if (depth === 0) {
+          kids.forEach((kid, i) => {
+            const θ = -Math.PI / 2 + radSector / 2 + i * radSector;
+            const len = linkLen1;
+            layout(kid, x + Math.cos(θ) * (rDyn + len), y + Math.sin(θ) * (rDyn + len), 1, θ);
+          });
+        } else {
+          const startAng = baseAngle - radSector / 2;
+          kids.forEach((kid, i) => {
+            const θ = startAng + radSector * (i / ((kids.length - 1) || 1));
+            let len = linkLen2Base + (kids.length - 1) * 20;
+            if (!kid.children?.length) len += extraLeaf;
+            layout(kid, x + Math.cos(θ) * (rDyn + len), y + Math.sin(θ) * (rDyn + len), depth + 1, θ);
+          });
+        }
       }
-    }
-    layout(root, cx, cy, 0, 0);
+      layout(root, cx, cy, 0, 0);
 
-    // --- Build Vue arrays ---
-    // 1) Nodes
-    const nodes = root.descendants().map(d3n => ({
-      id:              d3n.data.id,
-      type:            d3n.data.type    || 'circle',
-      text:            d3n.data.name,
-      left:            d3n.data.x - d3n.data.rDyn,
-      top:             d3n.data.y - d3n.data.rDyn,
-      width:           d3n.data.rDyn * 2,
-      height:          d3n.data.rDyn * 2,
-      rotation:        0,
-      backgroundColor: d3n.data.backgroundColor,
-      borderColor:     d3n.data.borderColor,
-      borderWidth:     d3n.data.borderWidth,
-      borderStyle:     d3n.data.borderStyle,
-      textColor:       d3n.data.textColor,
-      fontSize:        d3n.data.fontSize,
-      fontFamily:      d3n.data.fontFamily,
-      isBold:          d3n.data.isBold,
-      isItalic:        d3n.data.isItalic
-    }));
+      // --- Build Vue arrays ---
+      // 1) Nodes
+      const nodes = root.descendants().map(d3n => ({
+        id: d3n.data.id,
+        type: d3n.data.type || 'circle',
+        text: d3n.data.name,
+        left: d3n.data.x - d3n.data.rDyn,
+        top: d3n.data.y - d3n.data.rDyn,
+        width: d3n.data.rDyn * 2,
+        height: d3n.data.rDyn * 2,
+        rotation: 0,
+        backgroundColor: d3n.data.backgroundColor,
+        borderColor: d3n.data.borderColor,
+        borderWidth: d3n.data.borderWidth,
+        borderStyle: d3n.data.borderStyle,
+        textColor: d3n.data.textColor,
+        fontSize: d3n.data.fontSize,
+        fontFamily: d3n.data.fontFamily,
+        isBold: d3n.data.isBold,
+        isItalic: d3n.data.isItalic
+      }));
 
-    // 2) Links: parent → each child
-    const links = [];
-    root.descendants().forEach(d3n => {
-      if (d3n.parent) {
-        links.push({
-          from:      d3n.parent.data.id,
-          to:        d3n.data.id,
-          marker:    'none',
-          color:     '#333',
-          thickness: 1.5,
-          curvature: 0,
-          dash:      'solid'
-        });
+      // 2) Links: parent → each child
+      const links = [];
+      root.descendants().forEach(d3n => {
+        if (d3n.parent) {
+          links.push({
+            from: d3n.parent.data.id,
+            to: d3n.data.id,
+            marker: 'none',
+            color: '#333',
+            thickness: 1.5,
+            curvature: 0,
+            dash: 'solid'
+          });
+        }
+      });
+
+      // 3) Gán state
+      vm.nodes = nodes;
+      vm.links = links;
+    },
+    drawFreeMap(svg) {
+      console.count('drawFreeMap called');
+      const vm = this;
+      // 0) Lấy rawData (đã đổ từ mounted):
+      const rawData = vm.mindmapObject || { nodes: [], links: [] };
+
+      // 1) Map rawData.nodes → this.nodes (để Vue template tự render <div class="node">)
+      vm.nodes = (rawData.nodes || []).map(n => ({
+        id: String(n.id),                // QUAN TRỌNG: ép thành string
+        type: n.type || 'rectangle', // ví dụ
+        left: Number(n.x) || 0,          // CSS left
+        top: Number(n.y) || 0,          // CSS top
+        width: Number(n.width) || 120,
+        height: Number(n.height) || 80,
+        rotation: Number(n.rotation) || 0,
+        text: String(n.text || '').replace(/<[^>]+>/g, ''),
+        fontFamily: n.fontFamily || 'Arial',
+        fontSize: Number(n.fontSize) || 14,
+        isBold: !!n.isBold,
+        isItalic: !!n.isItalic,
+        textColor: n.textColor || '#000000',
+        align: n.align || 'center',
+        borderColor: n.borderColor || '#000000',
+        backgroundColor: n.backgroundColor || '#ffffff',
+        borderWidth: Number(n.borderWidth) || 1,
+        borderStyle: n.borderStyle || 'solid',
+        imageUrl: n.imageUrl || null,
+        custom: n.custom || null
+        // … nếu còn trường khác, hãy bổ sung tương tự …
+      }));
+      console.log('this.nodes = ', this.nodes.map(n => n.id));
+      // 2) Map rawData.links → this.links (normalize to/toPos)
+      const links = (rawData.links || []).map(l => {
+        // QUAN TRỌNG: Ép from, to thành string để match với node.id
+        const fromId = String(l.from);
+        const toId = (l.to != null && String(l.to) !== '')
+          ? String(l.to)
+          : null;
+
+        if (toId) {
+          // Link node→node: ép toPos = null
+          return {
+            id: String(l.id || `${fromId}-${toId}-${Date.now()}`),
+            from: fromId,
+            to: toId,
+            toPos: null,
+            attachedTo: toId || null,
+            color: l.color || '#000000',
+            thickness: Number(l.thickness) || 2,
+            dash: l.dash || 'solid',
+            curvature: Number(l.curvature) || 0,
+            marker: l.marker || 'none',
+            custom: l.custom || null,
+            path: l.path || '',
+            text: l.text || '',
+            fontFamily: l.fontFamily || 'Arial',
+            fontSize: Number(l.fontSize) || 14,
+            isBold: !!l.isBold,
+            isItalic: !!l.isItalic,
+            textColor: l.textColor || '#000',
+            align: l.align || 'middle'
+          };
+        } else {
+          // Free‐link: giữ nguyên toPos
+          const x = l.toPos && Number(l.toPos.x) != null ? Number(l.toPos.x) : 0;
+          const y = l.toPos && Number(l.toPos.y) != null ? Number(l.toPos.y) : 0;
+          return {
+            id: String(l.id || `${fromId}-free-${Math.round(x)}_${Math.round(y)}`),
+            from: fromId,
+            to: null,
+            toPos: { x, y },
+            attachedTo: null,
+            color: l.color || '#000000',
+            thickness: Number(l.thickness) || 2,
+            dash: l.dash || 'solid',
+            curvature: Number(l.curvature) || 0,
+            marker: l.marker || 'none',
+            custom: l.custom || null,
+            path: l.path || '',
+            text: l.text || '',
+            fontFamily: l.fontFamily || 'Arial',
+            fontSize: Number(l.fontSize) || 14,
+            isBold: !!l.isBold,
+            isItalic: !!l.isItalic,
+            textColor: l.textColor || '#000',
+            align: l.align || 'middle'
+          };
+        }
+      });
+      vm.links = links;
+      console.log(vm.links)
+      // 3) Đợi Vue build xong DOM <div class="node"> với left/top/…,
+      //    đồng thời Vue template cũng build các <g v-for="link in links">…
+      vm.$nextTick(() => {
+        svg.selectAll('g.link-group').remove();
+        // 4) Xóa tạm bất kỳ phần tử link do D3 cũ (nếu bạn từng append vào SVG)
+        svg.selectAll('path.link').remove();
+        svg.selectAll('circle.link-handle').remove();
+
+        // *** Không vẽ gì thêm ở đây, vì Vue template đã chịu trách nhiệm render link ***
+      });
+    },
+    // Hàm phụ để tính lại path khi drag node
+    computeLinkPath(link) {
+      // 1) Build map id→node ngay trong hàm
+      const nodesById = Object.fromEntries(
+        this.nodes.map(n => [n.id, n])
+      );
+
+      // 2) Lấy node nguồn
+      const s = nodesById[link.from];
+      // 3) Lấy node đích: nếu link.to tồn tại thì dùng node, còn không tạo object tạm từ toPos
+      const t = link.to != null && nodesById[link.to]
+        ? nodesById[link.to]
+        : { left: link.toPos?.x, top: link.toPos?.y, width: 0, height: 0 };
+
+      // 4) Nếu bất kỳ giá trị left/top không phải số thì thôi
+      if (!s || !t || isNaN(s.left) || isNaN(s.top) || isNaN(t.left) || isNaN(t.top)) {
+        console.warn('computeLinkPath: missing data for', link, s, t);
+        return '';
       }
-    });
 
-    // 3) Gán state
-    vm.nodes = nodes;
-    vm.links = links;
-  },
+      // 5) Tính tâm 2 node
+      const x1 = s.left + s.width / 2;
+      const y1 = s.top + s.height / 2;
+      const x2 = t.left + t.width / 2;
+      const y2 = t.top + t.height / 2;
 
+      // 6) Tạo control point cho curve
+      const dx = x2 - x1, dy = y2 - y1;
+      const cpx = x1 + dx / 2 - dy * (link.curvature || 0);
+      const cpy = y1 + dy / 2 + dx * (link.curvature || 0);
 
-  drawFreeMap(svg) {
-    const vm = this;
-    // 0) Lấy rawData (đã đổ từ mounted):
-    const rawData = vm.mindmapObject || { nodes: [], links: [] };
-
-    // 1) Map rawData.nodes → this.nodes (để Vue template tự render <div class="node">)
-    vm.nodes = (rawData.nodes || []).map(n => ({
-      id:            String(n.id),                // QUAN TRỌNG: ép thành string
-      type:          n.type       || 'rectangle', // ví dụ
-      left:          Number(n.x)   || 0,          // CSS left
-      top:           Number(n.y)   || 0,          // CSS top
-      width:         Number(n.width)  || 120,
-      height:        Number(n.height) || 80,
-      rotation:      Number(n.rotation) || 0,
-      text:          String(n.text || '').replace(/<[^>]+>/g,''), 
-      fontFamily:    n.fontFamily || 'Arial',
-      fontSize:      Number(n.fontSize) || 14,
-      isBold:        !!n.isBold,
-      isItalic:      !!n.isItalic,
-      textColor:     n.textColor || '#000000',
-      align:         n.align || 'center',
-      borderColor:   n.borderColor   || '#000000',
-      backgroundColor:n.backgroundColor || '#ffffff',
-      borderWidth:   Number(n.borderWidth) || 1,
-      borderStyle:   n.borderStyle || 'solid',
-      imageUrl:      n.imageUrl || null,
-      custom:        n.custom   || null
-      // … nếu còn trường khác, hãy bổ sung tương tự …
-    }));
-    console.log('this.nodes = ', this.nodes.map(n => n.id));
-    // 2) Map rawData.links → this.links (normalize to/toPos)
-    vm.links = (rawData.links || []).map(l => {
-      // QUAN TRỌNG: Ép from, to thành string để match với node.id
-      const fromId = String(l.from);
-      const toId   = (l.to != null && String(l.to) !== '') 
-                       ? String(l.to) 
-                       : null;
-
-      if (toId) {
-        // Link node→node: ép toPos = null
-        return {
-          id:         String(l.id || `${fromId}-${toId}-${Date.now()}`),
-          from:       fromId,
-          to:         toId,
-          toPos:      null,
-          attachedTo: toId,
-          color:      l.color     || '#000000',
-          thickness:  Number(l.thickness) || 2,
-          dash:       l.dash      || 'solid',
-          curvature:  Number(l.curvature) || 0,
-          marker:     l.marker    || 'none',
-          custom:     l.custom    || null
-        };
-      } else {
-        // Free‐link: giữ nguyên toPos
-        const x = l.toPos && Number(l.toPos.x) != null ? Number(l.toPos.x) : 0;
-        const y = l.toPos && Number(l.toPos.y) != null ? Number(l.toPos.y) : 0;
-        return {
-          id:         String(l.id || `${fromId}-free-${Math.round(x)}_${Math.round(y)}`),
-          from:       fromId,
-          to:         null,
-          toPos:      { x, y },
-          attachedTo: null,
-          color:      l.color     || '#000000',
-          thickness:  Number(l.thickness) || 2,
-          dash:       l.dash      || 'solid',
-          curvature:  Number(l.curvature) || 0,
-          marker:     l.marker    || 'none',
-          custom:     l.custom    || null
-        };
-      }
-    });
-
-    // 3) Đợi Vue build xong DOM <div class="node"> với left/top/…,
-    //    đồng thời Vue template cũng build các <g v-for="link in links">…
-    vm.$nextTick(() => {
-      // 4) Xóa tạm bất kỳ phần tử link do D3 cũ (nếu bạn từng append vào SVG)
-      svg.selectAll('path.link').remove();
-      svg.selectAll('circle.link-handle').remove();
-
-      // *** Không vẽ gì thêm ở đây, vì Vue template đã chịu trách nhiệm render link ***
-    });
-  },
-
-
-  // Hàm phụ để tính lại path khi drag node
-  computeLinkPath(link, nodesById) {
-    const s = nodesById[link.from];
-    const t = link.to != null && nodesById[link.to]
-      ? nodesById[link.to]
-      : { x: link.toPos?.x, y: link.toPos?.y, width:0, height:0 };
-      if (!s || !t || isNaN(s.x)||isNaN(s.y)||isNaN(t.x)||isNaN(t.y)) {
-        return '';  // hoặc 'M0,0 L0,0' để không vẽ gì
-      }
-    const x1 = s.x + s.width/2,  y1 = s.y + s.height/2;
-    const x2 = t.x + (t.width||0)/2, y2 = t.y + (t.height||0)/2;
-    const dx = x2-x1, dy = y2-y1;
-    const cpx = x1 + dx/2 - dy*(link.curvature||0);
-    const cpy = y1 + dy/2 + dx*(link.curvature||0);
-    return `M${x1},${y1} Q${cpx},${cpy} ${x2},${y2}`;
-  },
+      // 7) Trả về path SVG (quadratic Bézier)
+      return `M${x1},${y1} Q${cpx},${cpy} ${x2},${y2}`;
+    },
     _findNode(id, nodes) {
       const n = nodes.find(n => n.id === id);
       if (!n) {
@@ -1265,471 +1507,404 @@ export default {
       ctx.font = '12px sans-serif';
       return ctx.measureText(text).width;
     },
-    drawFlowMap(svg) {
+    drawFlowMap(svg, treeData) {
       const vm = this;
 
-      // 1) reset + marker arrow
-      svg.selectAll('*').remove();
-      const defs = svg.append('defs');
-      defs.append('marker')
-        .attr('id', 'arrow')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 10).attr('refY', 0)
-        .attr('markerWidth', 6).attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#888');
+      // 1) Đo SVG và tính tâm
+      const svgNode = svg.node();
+      if (!svgNode) {
+        console.error('SVG chưa sẵn sàng!');
+        return;
+      }
+      const width = svgNode.clientWidth;
+      const height = svgNode.clientHeight;
+      const cx = width / 4;
+      const cy = height / 2;
 
-      // 2) container + zoom/pan
-      const offsetX = 200, offsetY = 20;
-      const g = svg.append('g')
-        .attr('transform', `translate(${offsetX},${offsetY})`);
-      svg.call(
-        d3.zoom()
-          .scaleExtent([0.1, 4])
-          .on('zoom', ({ transform }) => g.attr('transform', transform))
-      );
+      // 2) Build cây JS thô
+      console.log('treeData:', treeData);
+      const rootObj = {
+        id: 'root',
+        name: treeData.root || '',
+        children: (treeData.branches || []).map(br => ({
+          id: `b:${br.title}`,
+          name: br.title,
+          children: (br.subBranches || []).map(sb => ({
+            id: `b:${br.title}|s:${sb}`,
+            name: sb
+          }))
+        }))
+      };
+      console.log('rootObj:', rootObj);
 
-      // 3) hierarchy + tree layout
-      const data = vm.buildHierarchy(vm.mindmapObject);
-      const root = d3.hierarchy(data);
-      const treeLayout = d3.tree()
-        .nodeSize([80, 200])
-        .separation((a, b) => a.parent === b.parent ? 1 : 2);
-      treeLayout(root);
+      // 3) D3 hierarchy + tree layout
+      const root = d3.hierarchy(rootObj, d => d.children || []);
+      d3.tree()
+        .nodeSize([70, 300])
+        .separation((a, b) => a.parent === b.parent ? 1 : 2)(root);
 
-      // 4) link generator
+      // 4) Tính offset để root về giữa
+      const rootX = Number(root.x) || 0;
+      const rootY = Number(root.y) || 0;
+      const offsetX = cx - rootY;
+      const offsetY = cy - rootX;
+      console.log({ rootX, rootY, offsetX, offsetY });
+
+      // 5) Khởi tạo link generator
       const linkGen = d3.linkHorizontal()
-        .x(d => d.y)
-        .y(d => d.x);
-
-      // 5) draw & animate links
-      g.selectAll('path.link')
-        .data(root.links())
-        .enter().append('path')
-        .attr('class', 'link')
-        .attr('d', linkGen)
-        .attr('fill', 'none')
-        .attr('stroke', '#999')
-        .attr('stroke-width', 2)
-        .attr('marker-end', 'url(#arrow)')
-        // chuẩn bị animation
-        .attr('stroke-dasharray', function () {
-          const L = this.getTotalLength();
-          return `${L} ${L}`;
-        })
-        .attr('stroke-dashoffset', function () {
-          return this.getTotalLength();
-        })
-        .transition()
-        // delay theo depth để vẽ từ gốc trước, ra xa sau
-        .delay(d => d.source.depth * 300)
-        .duration(600)
-        .ease(d3.easeLinear)
-        .attr('stroke-dashoffset', 0);
-
-      // 6) wrap 4 từ 1 dòng
-      function wrap4(text) {
-        const words = text.split(/\s+/), lines = [];
-        for (let i = 0; i < words.length; i += 3) {
-          lines.push(words.slice(i, i + 3).join(' '));
-        }
-        return lines;
+        .x(d => ((Number(d.y) || 0)) + offsetX)
+        .y(d => (Number(d.x) || 0) + offsetY);
+      // 6) Helper đo text width
+      const ctx = vm._canvasCtx || (vm._canvasCtx = document.createElement('canvas').getContext('2d'));
+      function textWidth(text, size, bold = false) {
+        ctx.font = (bold ? 'bold ' : '') + size + 'px Arial';
+        return ctx.measureText(text).width;
       }
 
-      // 7) draw nodes
-      const nodes = g.selectAll('g.node')
-        .data(root.descendants())
-        .enter().append('g')
-        .attr('class', 'node')
-        .attr('transform', d => {
-          const extraX = d.depth === 1 ? 100 : 0;
-          return `translate(${d.y + extraX},${d.x})`;
-        });
+      // 7) Build vm.nodes (thêm left/top cho DIV, x/y cho SVG)
+      vm.nodes = root.descendants().map(d => {
+        const depth = d.depth;
+        const isRoot = depth === 0;
+        const text = d.data.name;
+        const fontSize = Math.max(14 - depth * 2, 10);
+        const wText = textWidth(text, fontSize, isRoot);
 
-      // 8) root node
-      nodes.filter(d => d.depth === 0)
-        .each((d, i, els) => {
-          const nd = d3.select(els[i]);
-          const lines = wrap4(d.data.name);
-          const font = '16px sans-serif';
-          const maxW = Math.min(200,
-            Math.max(...lines.map(l => vm.textWidth(l, font)))
-          );
-          const r = maxW / 2 + 20;
+        const widthNode = isRoot ? wText + 40 : wText + 20;
+        const heightNode = isRoot ? wText + 40 : fontSize * 1.5;
 
-          nd.append('circle')
-            .attr('r', r)
-            .attr('fill', '#fff')
-            .attr('stroke', '#333')
-            .attr('stroke-width', 4);
+        const rawX = Number(d.y);
+        const rawY = Number(d.x);
+        const x = (isNaN(rawX) ? 0 : rawX) + offsetX;
+        const y = (isNaN(rawY) ? 0 : rawY) + offsetY;
 
-          const textEl = nd.append('text')
-            .attr('text-anchor', 'middle')
-            .attr('dominant-baseline', 'middle')
-            .style('font-size', font)
-            .style('font-weight', 'bold');
+        return {
+          id: d.data.id,
+          type: isRoot ? 'circle' : 'rectangle',
+          x,                // dùng cho <circle cx,cy> hoặc draw SVG
+          y,
+          left: x, // dùng cho <div style="left:…, top:…">
+          top: y,
+          width: widthNode * 1.5,
+          height: heightNode * 1.5,
+          rotation: 0,
+          text,
+          fontFamily: 'Arial',
+          fontSize: isRoot ? 20 : 14,
+          isBold: isRoot,
+          isItalic: false,
+          textColor: '#000000',
+          align: 'center',
+          borderColor: '#000',
+          backgroundColor: 'aqua',
+          borderWidth: 1,
+          borderStyle: 'solid',
+          imageUrl: null
+        };
+      });
+      console.log('nodes:', vm.nodes);
 
-          lines.forEach((ln, idx) => {
-            textEl.append('tspan')
-              .attr('x', 0)
-              .attr('dy', idx === 0 ? `-${(lines.length - 1) * 0.6}em` : '1.2em')
-              .text(ln);
-          });
-        });
-
-      // 9) non-root nodes (depth >= 1)
-      nodes.filter(d => d.depth >= 1)
-        .each((d, i, els) => {
-          const nd = d3.select(els[i]);
-          const lines = wrap4(d.data.name);
-          const font = '12px sans-serif';
-          const padH = 6, padV = 4;
-          const maxW = Math.max(...lines.map(l => vm.textWidth(l, font)));
-          const wRect = maxW + padH * 6;
-          const hRect = lines.length * 20 + padV * 2;
-
-          nd.append('rect')
-            .attr('x', d.children ? -wRect - 4 : 4)
-            .attr('y', -hRect / 2)
-            .attr('width', wRect)
-            .attr('height', hRect)
-            .attr('rx', 4).attr('ry', 4)
-            .attr('fill', '#f9f9f9')
-            .attr('stroke', '#007bff')
-            .attr('stroke-width', 1.5);
-
-          const textEl = nd.append('text')
-            .attr('text-anchor', d.children ? 'end' : 'start')
-            .attr('dominant-baseline', 'middle')
-            .style('font-size', font);
-          if (this.includeImage && this.leafImages[d.data.name]) {
-            const xOff = d.children
-              ? -wRect - 10 // trái
-              : wRect + 10;      // phải
-            nd.append('image')
-              .attr('href', this.leafImages[d.data.name])
-              .attr('x', xOff)
-              .attr('y', -hRect / 2)
-              .attr('width', 50)
-              .attr('height', 50);
-          }
-          lines.forEach((ln, idx) => {
-            textEl.append('tspan')
-              .attr('x', d.children ? -padH - 4 : padH + 4)
-              .attr('dy', idx === 0 ? `-${(lines.length - 1) * 0.6}em` : '1.2em')
-              .text(ln);
-          });
-        });
-      if (this.includeImage) {
-        const leafSelection = nodes
-          .filter(d =>
-            !d.children &&
-            this.includeImage &&
-            this.leafImages[d.data.name]
-          );
-
-        console.log('Leaf nodes for image:', leafSelection.size());
-        leafSelection.append('image')
-          .attr('href', d => this.leafImages[d.data.name])
-          .attr('x', 25)
-          .attr('y', -25)
-          .attr('width', 50)
-          .attr('height', 50);
-      }
+      // 8) Build vm.links
+      vm.links = root.links().map((link, i) => ({
+        id: `l${i}`,
+        from: link.source.data.id,
+        to: link.target.data.id,
+        toPos: null,
+        color: '#0bf',
+        thickness: 2,
+        dash: 'solid',
+        curvature: (link.source.depth - link.target.depth) * 0.01,
+        marker: 'arrow',
+        custom: null,
+        path: linkGen(link),
+        text: '',
+        fontFamily: 'Arial',
+        fontSize: 12,
+        isBold: false,
+        isItalic: false,
+        textColor: '#000000',
+        align: 'middle'
+      }));
+      console.log('links:', vm.links);
     },
-    drawMultiFlowMap(svg) {
+    drawMultiFlowMap(svg, treeData) {
       const vm = this;
-      const w = svg.node().clientWidth;
-      const h = svg.node().clientHeight;
+      const svgEl = svg.node();
+      if (!svgEl) return;
+      const W = svgEl.clientWidth, H = svgEl.clientHeight;
+      const cx = W / 1.8, cy = H / 4;
 
-      // 1) Clear & marker
-      svg.selectAll('*').remove();
-      const defs = svg.append('defs');
-      defs.append('marker')
-        .attr('id', 'arrow')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 5)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#888');
-
-      // 2) Container + zoom/pan
-      const g = svg.append('g')
-        .attr('transform', `translate(${w / 2},${h / 2})`);
-      svg.call(
-        d3.zoom().scaleExtent([0.1, 4])
-          .on('zoom', ({ transform }) => g.attr('transform', transform))
-      );
-
-      // 3) Text wrap utility
-      function wrap4(txt) {
-        if (typeof txt !== 'string') txt = '';
-        const words = txt.split(/\s+/), lines = [];
-        for (let i = 0; i < words.length; i += 3) {
-          lines.push(words.slice(i, i + 3).join(' '));
-        }
-        return lines;
-      }
-
-      // 4) Build hierarchy & split
-      const treeObj = vm.buildHierarchy(vm.mindmapObject);
-      const allKids = treeObj.children || [];
-      const half = Math.ceil(allKids.length / 2);
-      const leftKids = allKids.slice(0, half);
-      const rightKids = allKids.slice(half);
-      const leftRoot = d3.hierarchy({ children: leftKids }, d => d.children);
-      const rightRoot = d3.hierarchy({ children: rightKids }, d => d.children);
-
-      // 5) Layout
-      const vert = 100, hor = 300;
-      const layout = d3.tree().nodeSize([vert, hor]).separation((a, b) => a.parent === b.parent ? 1 : 2);
-      layout(leftRoot);
-      layout(rightRoot);
-
-      // 6) Vertical center
-      const leftYs = leftRoot.descendants().map(d => d.x);
-      const rightYs = rightRoot.descendants().map(d => d.x);
-      const leftMid = (d3.min(leftYs) + d3.max(leftYs)) / 2;
-      const rightMid = (d3.min(rightYs) + d3.max(rightYs)) / 2;
-
-      // 7) Root metrics & shift
-      const rootLines = wrap4(treeObj.name);
-      const font0 = '16px sans-serif';
-      const maxRW = Math.min(200, Math.max(...rootLines.map(l => vm.textWidth(l, font0))));
-      const r0 = maxRW / 2 + 20;
-      const rootShiftX = 30;
-
-      // 8) Text & marker params
-      const textFont = '12px sans-serif';
-      const padH = 6;
-      const padV = 4;
-      const markerAdjust = 4;
-      const marginLeft = -80;
-      const marginRight = 100;
-
-      // compute arrow shift to touch node border
-      function computeShift(name) {
-        const lines = wrap4(name);
-        const maxW = Math.max(...lines.map(l => vm.textWidth(l, textFont)));
-        const rectW = maxW + padH * 6;
-        return rectW / 2 + markerAdjust;
-      }
-
-      // 9) Draw links under nodes
-      const doLinks = (root, flip) => {
-        const linkGen = d3.linkHorizontal()
-          .x(d => flip ? -d.y : d.y)
-          .y(d => d.x);
-        g.append('g').selectAll('path.link').data(root.links()).enter().append('path')
-          .attr('class', 'link')
-          .attr('fill', 'none')
-          .attr('stroke', '#999')
-          .attr('stroke-width', 2)
-          .attr('marker-end', 'url(#arrow)')
-          .attr('stroke-dasharray', function () { const L = this.getTotalLength(); return `${L} ${L}`; })
-          .attr('stroke-dashoffset', function () { return this.getTotalLength(); })
-          .attr('d', d => {
-            const vSrc = d.source.x - (flip ? rightMid : leftMid);
-            const vTgt = d.target.x - (flip ? rightMid : leftMid);
-            const hSrc = d.source.y + (d.source.depth === 0 ? (flip ? -r0 : r0) : 0);
-            let hTgt = d.target.y;
-            const shift = computeShift(d.target.data.name);
-            if (!flip && d.target.depth === 1) hTgt += shift;
-            if (flip && !d.target.children) hTgt -= shift;
-            return linkGen({ source: { x: vSrc, y: hSrc }, target: { x: vTgt, y: hTgt } });
-          })
-          .transition().delay(d => d.source.depth * 300).duration(600).ease(d3.easeLinear)
-          .attr('stroke-dashoffset', 0);
+      // 1) build rootObj
+      const rootObj = {
+        id: 'root',
+        name: treeData.root || '',
+        children: (treeData.branches || []).map(br => ({
+          id: `b:${br.title}`,
+          name: br.title,
+          children: (br.subBranches || []).map(sb => ({
+            id: `b:${br.title}|s:${sb}`,
+            name: sb
+          }))
+        }))
       };
-      doLinks(leftRoot, true);
-      doLinks(rightRoot, false);
 
-      // 10) Draw root above links
-      const rootG = g.append('g').attr('transform', `translate(${rootShiftX},0)`);
-      rootG.append('circle')
-        .attr('r', r0)
-        .attr('fill', '#fff')
-        .attr('stroke', '#333')
-        .attr('stroke-width', 4);
-      const rt = rootG.append('text')
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', font0)
-        .style('font-weight', 'bold');
-      rootLines.forEach((ln, i) => {
-        rt.append('tspan')
-          .attr('x', 0)
-          .attr('dy', i === 0 ? `-${(rootLines.length - 1) * 0.6}em` : '1.2em')
-          .text(ln);
+      // 2) full-tree layout
+      const root = d3.hierarchy(rootObj, d => d.children);
+      d3.tree().nodeSize([80, 100]).separation((a, b) => a.parent === b.parent ? 1 : 2)(root);
+
+      // 3) offset to center
+      const oX = cx - root.y, oY = cy - root.x;
+
+      // 4) textWidth helper
+      const ctx = vm._txtCtx ||= document.createElement('canvas').getContext('2d');
+      function textWidth(txt, size, bold = false) {
+        ctx.font = `${bold ? 'bold ' : ''}${size}px Arial`;
+        return ctx.measureText(txt).width;
+      }
+
+      // 5) linkGen
+      const linkGen = d3.linkHorizontal()
+        .x(d => d.y + oX)
+        .y(d => d.x + oY);
+
+      // 6) reset arrays
+      vm.nodes = [];
+      vm.links = [];
+
+      // 7) add root node
+      const baseSize = 20;
+      const w0 = Math.min(200, textWidth(rootObj.name, baseSize, true));
+      const r0 = w0 / 2 + 20;
+      vm.nodes.push({
+        id: rootObj.id,
+        type: 'circle',
+        x: oX,
+        y: oY,
+        left: oX,
+        top: oY,
+        width: r0 * 2,
+        height: r0 * 2,
+        text: rootObj.name,
+        fontFamily: 'Arial',
+        fontSize: baseSize,
+        isBold: true,
+        isItalic: false,
+        textColor: '#000',
+        align: 'center',
+        borderColor: '#000',
+        backgroundColor: 'aqua',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        imageUrl: null
       });
 
-      // 11) Draw nodes above links
-      const doNodes = (root, flip) => {
-        g.append('g').selectAll('g.node').data(root.descendants().slice(1)).enter().append('g')
-          .attr('class', 'node')
-          .attr('transform', d => {
-            const v = d.x - (flip ? rightMid : leftMid);
-            let h = d.y;
-            if (!flip && d.depth === 1) h += marginRight;
-            if (flip && !d.children) h -= marginLeft;
-            const x = flip ? -h : h;
-            return `translate(${x},${v})`;
-          })
-          .each(function (d) {
-            const nd = d3.select(this);
-            const lines = wrap4(d.data.name);
-            const maxW = Math.max(...lines.map(l => vm.textWidth(l, textFont)));
-            const wRect = maxW + padH * 8;
-            const hRect = lines.length * 20 + padV * 2;
-            nd.append('rect')
-              .attr('x', d.children ? -wRect - 4 : 4)
-              .attr('y', -hRect / 2)
-              .attr('width', wRect)
-              .attr('height', hRect)
-              .attr('rx', 4).attr('ry', 4)
-              .attr('fill', '#f9f9f9')
-              .attr('stroke', '#007bff')
-              .attr('stroke-width', 1.5);
-            const t = nd.append('text')
-              .attr('text-anchor', d.children ? 'end' : 'start')
-              .attr('dominant-baseline', 'middle')
-              .style('font-size', textFont);
-            lines.forEach((ln, i) => {
-              t.append('tspan')
-                .attr('x', d.children ? -padH - 4 : padH + 4)
-                .attr('dy', i === 0 ? `-${(lines.length - 1) * 0.6}em` : '1.2em')
-                .text(ln);
-            });
+      // 8) split children into left/right
+      const kids = rootObj.children;
+      const midIdx = Math.ceil(kids.length / 2);
+      const leftKids = kids.slice(0, midIdx);
+      const rightKids = kids.slice(midIdx);
+
+      // 9) makeSub đưa vào cả id và name
+      const makeSub = arr => d3.hierarchy(
+        { id: rootObj.id, name: rootObj.name, children: arr },
+        d => d.children
+      );
+
+      const leftRoot = makeSub(leftKids);
+      const rightRoot = makeSub(rightKids);
+      d3.tree().nodeSize([80, 300]).separation((a, b) => a.parent === b.parent ? 1 : 2)(leftRoot);
+      d3.tree().nodeSize([80, 330]).separation((a, b) => a.parent === b.parent ? 1 : 2)(rightRoot);
+
+      // 10) compute mid-Y for centering each half
+      const Ys = R => R.descendants().map(d => d.x);
+      const midY = arr => (Math.min(...arr) + Math.max(...arr)) / 2;
+      const lMid = midY(Ys(leftRoot));
+      const rMid = midY(Ys(rightRoot));
+
+      // 11) collect links & nodes for each half
+      function collect(subRoot, mid, flip) {
+        // links
+        subRoot.links().forEach((l, i) => {
+          const sx = l.source.x - mid;
+          const sy = l.source.y + (l.source.depth === 0 ? (flip ? -r0 : r0) : 0);
+          const tx = l.target.x - mid;
+          const ty = l.target.y;
+          vm.links.push({
+            id: `link_${flip ? 'L' : 'R'}_${i}`,
+            from: l.source.data.id,  // now always defined
+            to: l.target.data.id,
+            toPos: null,
+            color: 'aqua',
+            thickness: 2,
+            dash: 'solid',
+            curvature: 0,
+            marker: 'arrow',
+            custom: null,
+            path: linkGen({ source: { x: sx, y: sy }, target: { x: tx, y: ty } }),
+            text: '',
+            fontFamily: 'Arial',
+            fontSize: 14,
+            isBold: false,
+            isItalic: false,
+            textColor: '#000',
+            align: 'middle'
           });
-      };
-      doNodes(leftRoot, true);
-      doNodes(rightRoot, false);
+        });
+
+        // nodes (excluding root)
+        subRoot.descendants().slice(1).forEach(d => {
+          let vy = d.x - mid;
+          let hx = d.y + (d.depth === 1 ? (flip ? -100 : 100) : 0);
+          if (flip) hx = -hx;
+          const txt = d.data.name;
+          const fs = Math.max(12 - d.depth * 2, 10);
+          const w = textWidth(txt, fs);
+          const hw = w + 20;
+          const hh = fs * 1.2 + 8;
+          const x = hx + oX;
+          const y = vy + oY + 50;
+          vm.nodes.push({
+            id: d.data.id,
+            type: 'rectangle',
+            x, y,
+            left: x,
+            top: y,
+            width: hw * 1.5,
+            height: hh * 1.5,
+            text: txt,
+            fontFamily: 'Arial',
+            fontSize: fs,
+            isBold: false,
+            isItalic: false,
+            textColor: '#000',
+            align: 'center',
+            borderColor: '#000',
+            backgroundColor: 'aqua',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            imageUrl: null
+          });
+        });
+      }
+
+      collect(leftRoot, lMid, true);
+      collect(rightRoot, rMid, false);
     },
-    drawBraceMap(svg) {
-      const w = svg.node().clientWidth;
-      const h = svg.node().clientHeight;
-
-      // — Clear old elements —
-      svg.selectAll('*').remove();
-
-      // — Build hierarchy & initial layout —
-      const root = d3.hierarchy(this.buildHierarchy(this.mindmapObject));
-      d3.tree().size([w - 100, h - 100])(root);
-      const level1Count = root.children ? root.children.length : 0;
-      root.x = 200 * level1Count;
-
-      // — Create group at center apex + zoom support —
-      const g = svg.append('g')
-        .attr('transform', `translate(${w / 2},20)`);
-      svg.call(
-        d3.zoom()
-          .scaleExtent([0.5, 3])
-          .on('zoom', ({ transform }) => {
-            g.attr('transform', `translate(${transform.x + w / 2},${transform.y + 20}) scale(${transform.k})`);
-          })
-      );
-
-      // — Fan-out leaf nodes under each level-1 node —
-      const leafYSpacing = 100;
-      const leafXSpacing = 120;
-      const level1MarginX = 500;
-      (root.children || []).forEach((parent, i) => { parent.x = i * level1MarginX; });
-      root.children.forEach(parent => {
-        const leaves = parent.children || [];
-        const n = leaves.length;
-        leaves.forEach((leaf, i) => {
-          leaf.x = parent.x + (i - (n - 1) / 2) * leafXSpacing;
-          leaf.y = parent.y + leafYSpacing;
-        });
-      });
-
-      // — Draw & animate links —
-      const links = g.append('g').selectAll('path.link')
-        .data(root.links())
-        .enter().append('path')
-        .attr('class', 'link')
-        .attr('d', d => d.target.depth === 2
-          ? `M${d.source.x},${d.source.y}L${d.source.x},${d.target.y}L${d.target.x},${d.target.y}`
-          : `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`
-        )
-        .attr('fill', 'none')
-        .attr('stroke', '#555')
-        .attr('marker-end', 'url(#arrow)')
-        .each(function () {
-          const total = this.getTotalLength();
-          d3.select(this)
-            .attr('stroke-dasharray', `${total} ${total}`)
-            .attr('stroke-dashoffset', total);
-        });
-      links.transition()
-        .delay(d => d.source.depth * 300)
-        .duration(600)
-        .attr('stroke-dashoffset', 0)
-        .ease(d3.easeLinear);
-
-      // — Draw & animate nodes —
-      const wrapLines = txt => {
-        const words = (txt || '').split(/\s+/);
-        const lines = [];
-        for (let i = 0; i < words.length; i += 3) {
-          lines.push(words.slice(i, i + 3).join(' '));
-        }
-        return lines;
+    drawBraceMap(svgSel, treeData) {
+      const vm = this;
+      const svgEl = svgSel.node();
+      if (!svgEl) return;
+      const W = svgEl.clientWidth, H = svgEl.clientHeight;
+      const cx = W / 0.45, cy0 = 100; // cy0 = offset-top
+      console.log(H)
+      // 1) Build rootObj thủ công
+      const rootObj = {
+        id: 'root',
+        name: treeData.root || '',
+        children: (treeData.branches || []).map(br => ({
+          id: `b:${br.title}`,
+          name: br.title,
+          children: (br.subBranches || []).map(sb => ({
+            id: `b:${br.title}|s:${sb}`,
+            name: sb
+          }))
+        }))
       };
 
-      const nodes = g.append('g').selectAll('g.node')
-        .data(root.descendants())
-        .enter().append('g')
-        .attr('class', 'node')
-        .attr('transform', d => `translate(${d.x},${d.y})`)
-        .attr('opacity', 0);
+      // 2) Tạo hierarchy
+      const root = d3.hierarchy(rootObj, d => d.children);
 
-      nodes.each(function (d) {
-        const nd = d3.select(this);
-        const lines = wrapLines(d.data.name);
-        // Set style by depth
-        let fontSize, pad, strokeWidth;
-        if (d.depth === 0) {
-          fontSize = 18; pad = 15; strokeWidth = 3;
-        } else if (d.depth === 1) {
-          fontSize = 14; pad = 10; strokeWidth = 2;
-        } else {
-          fontSize = 10; pad = 6; strokeWidth = 1;
-        }
-        const text = nd.append('text')
-          .attr('text-anchor', 'middle')
-          .attr('dominant-baseline', 'middle')
-          .style('font-size', `${fontSize}px`);
-        lines.forEach((ln, i) => {
-          text.append('tspan')
-            .attr('x', 0)
-            .attr('dy', i === 0 ? `-${(lines.length - 1) * 0.6}em` : '1.2em')
-            .text(ln);
-        });
-        const bbox = text.node().getBBox();
-        nd.insert('rect', 'text')
-          .attr('x', bbox.x - pad)
-          .attr('y', bbox.y - pad)
-          .attr('width', bbox.width + pad * 2)
-          .attr('height', bbox.height + pad * 2)
-          .attr('rx', pad / 2)
-          .attr('ry', pad / 2)
-          .attr('fill', 'white')
-          .attr('stroke', 'purple')
-          .attr('stroke-width', strokeWidth);
+      // 3) Phân cấp cố định:
+      const Y1 = 100;    // y của cấp 1 so với cy0
+      const Y2 = 150;    // y của cấp 2 so với cấp 1
+      const gapX1 = 800; // gap ngang giữa các node cấp 1
+      const gapX2 = 180;  // gap ngang giữa các node cấp 2
+
+      // Root
+      root.x = cx;
+      root.y = cy0;
+
+      // Cấp 1
+      (root.children || []).forEach((p, i, arr) => {
+        p.x = cx + (i - (arr.length - 1) / 2) * gapX1;
+        p.y = cy0 + Y1;
       });
 
-      nodes.transition()
-        .delay(d => d.depth * 300 + 600)
-        .duration(600)
-        .attr('opacity', 1);
+      // Cấp 2
+      root.children?.forEach(p => {
+        (p.children || []).forEach((leaf, i, arr) => {
+          leaf.x = p.x + (i - (arr.length - 1) / 2) * gapX2;
+          leaf.y = cy0 + Y1 + Y2;
+        });
+      });
 
+      // 4) Build links
+      vm.links = root.links().map((d, i) => {
+        const sx = d.source.x, sy = d.source.y;
+        const tx = d.target.x, ty = d.target.y;
+        return {
+          id: `link${i}`,
+          from: d.source.data.id,
+          to: d.target.data.id,
+          toPos: null,
+          color: '#555',
+          thickness: 2,
+          dash: 'solid',
+          curvature: 0,
+          marker: 'arrow',
+          custom: null,
+          path: `M${sx},${sy}L${tx},${ty}`,
+          text: '',
+          fontFamily: 'Arial',
+          fontSize: 12,
+          isBold: false,
+          isItalic: false,
+          textColor: '#000',
+          align: 'middle'
+        };
+      });
+
+      // 5) textWidth helper
+      const ctx = vm._txtCtx ||= document.createElement('canvas').getContext('2d');
+      function textWidth(txt, size, bold = false) {
+        ctx.font = `${bold ? 'bold ' : ''}${size}px Arial`;
+        return ctx.measureText(txt).width;
+      }
+
+      // 6) Build nodes
+      vm.nodes = root.descendants().map(d => {
+        const x = d.x, y = d.y;
+        let fontSize, pad, strokeW;
+        if (d.depth === 0) { fontSize = 18; pad = 15; strokeW = 3; }
+        else if (d.depth === 1) { fontSize = 14; pad = 10; strokeW = 2; }
+        else { fontSize = 12; pad = 8; strokeW = 1; }
+
+        const text = d.data.name;
+        const wText = Math.min(200, textWidth(text, fontSize, d.depth === 0));
+        const width = wText + pad * 2;
+        const height = fontSize * 1.2 + pad * 2;
+
+        return {
+          id: d.data.id,
+          type: 'rectangle',
+          x, y,
+          left: x - width / 2,
+          top: y - height / 2,
+          width, height,
+          rotation: 0,
+          text,            // 1 line
+          fontFamily: 'Arial',
+          fontSize,
+          isBold: d.depth === 0,
+          isItalic: false,
+          textColor: '#000',
+          align: 'center',
+          borderColor: 'purple',
+          backgroundColor: '#fff',
+          borderWidth: strokeW,
+          borderStyle: 'solid',
+          imageUrl: null
+        };
+      });
     },
     selectTemplate(key) {
       const tpl = this.templates.find(t => t.key === key)
@@ -1835,52 +2010,89 @@ export default {
       };
     },
     computeTaperedBranch(link) {
-  // 1) Lấy tọa độ start/end
-  const start = this.getNodeCenter(link.from);
-  const end   = link.toPos
-    ? { x: link.toPos.x, y: link.toPos.y }
-    : this.getNodeCenter(link.to);
-  if (!start || !end) return '';
+      // 1) Lấy tọa độ start/end
+      const start = this.getNodeCenter(link.from);
+      const end = link.toPos
+        ? { x: link.toPos.x, y: link.toPos.y }
+        : this.getNodeCenter(link.to);
+      if (!start || !end) return '';
 
-  // 2) Tính Bézier Q control-point có offset theo curvature
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const mx = (start.x + end.x) / 2;
-  const my = (start.y + end.y) / 2;
-  const len = Math.hypot(dx, dy) || 1;
-  // Vector pháp tuyến (unit)
-  const ux = -dy / len;
-  const uy =  dx / len;
-  // Offset = curvature * len (nhúng curvature vào đây)
-  const offset = (link.curvature || 0) * len;
-  const cx = mx + ux * offset;
-  const cy = my + uy * offset;
+      // 2) Tính Bézier Q control-point có offset theo curvature
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const mx = (start.x + end.x) / 2;
+      const my = (start.y + end.y) / 2;
+      const len = Math.hypot(dx, dy) || 1;
+      // Vector pháp tuyến (unit)
+      const ux = -dy / len;
+      const uy = dx / len;
+      // Offset = curvature * len (nhúng curvature vào đây)
+      const offset = (link.curvature || 0) * len;
+      const cx = mx + ux * offset;
+      const cy = my + uy * offset;
 
-  // 3) Chia thành N segment để tạo taper
-  const N = 30;
-  const leftPts  = [];
-  const rightPts = [];
-  for (let i = 0; i <= N; i++) {
-    const t = i / N;
-    // Công thức Q-bezier
-    const x = (1 - t)**2 * start.x
-            + 2 * (1 - t) * t * cx
-            + t**2 * end.x;
-    const y = (1 - t)**2 * start.y
-            + 2 * (1 - t) * t * cy
-            + t**2 * end.y;
-    // Vector pháp tuyến (không đổi)
-    const nx = ux;
-    const ny = uy;
-    // Độ rộng taper: đầu = thickness, cuối = 0
-    const w = (link.thickness || 2) * (1 - t);
-    leftPts.push (`${x + nx * w/2},${y + ny * w/2}`);
-    rightPts.unshift(`${x - nx * w/2},${y - ny * w/2}`);
-  }
+      // 3) Chia thành N segment để tạo taper
+      const N = 30;
+      const leftPts = [];
+      const rightPts = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        // Công thức Q-bezier
+        const x = (1 - t) ** 2 * start.x
+          + 2 * (1 - t) * t * cx
+          + t ** 2 * end.x;
+        const y = (1 - t) ** 2 * start.y
+          + 2 * (1 - t) * t * cy
+          + t ** 2 * end.y;
+        // Vector pháp tuyến (không đổi)
+        const nx = ux;
+        const ny = uy;
+        // Độ rộng taper: đầu = thickness, cuối = 0
+        const w = (link.thickness || 2) * (1 - t);
+        leftPts.push(`${x + nx * w / 2},${y + ny * w / 2}`);
+        rightPts.unshift(`${x - nx * w / 2},${y - ny * w / 2}`);
+      }
 
-  // 4) Ghép thành path đóng
-  return `M${leftPts.join('L')}L${rightPts.join('L')}Z`;
-},
+      // 4) Ghép thành path đóng
+      return `M${leftPts.join('L')}L${rightPts.join('L')}Z`;
+    },
+    computeRadialLinkPath(link) {
+      const fromCenter = this.getNodeCenter(link.from);
+      if (!fromCenter) return "";
+
+      const toCenter = link.toPos
+        ? { x: link.toPos.x, y: link.toPos.y }
+        : this.getNodeCenter(link.to);
+      if (!toCenter) return "";
+
+      // Lấy tâm chính xác của SVG
+      const rectSVG = this.$refs.canva.getBoundingClientRect();
+      const cx = rectSVG.width / 2;
+      const cy = rectSVG.height / 2;
+
+      const dx1 = fromCenter.x - cx;
+      const dy1 = fromCenter.y - cy;
+      const angle1 = Math.atan2(dy1, dx1);
+      const r1 = Math.hypot(dx1, dy1);
+
+      const dx2 = toCenter.x - cx;
+      const dy2 = toCenter.y - cy;
+      const angle2 = Math.atan2(dy2, dx2);
+      const r2 = Math.hypot(dx2, dy2);
+
+      const x1 = r1 * Math.cos(angle1) + cx;
+      const y1 = r1 * Math.sin(angle1) + cy;
+      const x2 = r2 * Math.cos(angle2) + cx;
+      const y2 = r2 * Math.sin(angle2) + cy;
+
+      const midR = (r1 + r2) / 2;
+      const xi1 = midR * Math.cos(angle1) + cx;
+      const yi1 = midR * Math.sin(angle1) + cy;
+      const xi2 = midR * Math.cos(angle2) + cx;
+      const yi2 = midR * Math.sin(angle2) + cy;
+
+      return `M ${x1},${y1} C ${xi1},${yi1} ${xi2},${yi2} ${x2},${y2}`;
+    },
     midPoint(link) {
       const start = this.getNodeCenter(link.from);
       const end = link.toPos
@@ -1968,46 +2180,47 @@ export default {
       this.selectedLink = null;
     },
     handleNodeClick(node) {
-    if (!this.linking.active) {
-      this.selectNode(node);
-    }
-  },
+      if (!this.linking.active) {
+        this.selectNode(node);
+      }
+    },
 
-  // duy nhất một chỗ set selectedNode và panel
-  selectNode(node) {
-    this.selectedNode        = node;
-    this.selectedLink        = null;                // clear link selection
-    this.selectedColor       = node.textColor  || '#000000';
-    this.selectedFont        = node.fontFamily || 'Arial';
-    this.selectedAlign       = node.align      || 'center';
-    this.nodeBorderColor     = node.borderColor;
-    this.nodeBackgroundColor = node.backgroundColor;
-    this.nodeBorderThickness = node.borderWidth;
-    this.nodeBorderStyle     = node.borderStyle;
+    // duy nhất một chỗ set selectedNode và panel
+    selectNode(node) {
+      this.selectedNode = node;
+      this.selectedLink = null;                // clear link selection
+      this.selectedColor = node.textColor || '#000000';
+      this.selectedFont = node.fontFamily || 'Arial';
+      this.selectedAlign = node.align || 'center';
+      this.nodeBorderColor = node.borderColor;
+      this.nodeBackgroundColor = node.backgroundColor;
+      this.nodeBorderThickness = node.borderWidth;
+      this.nodeBorderStyle = node.borderStyle;
+      this.selectedFontSize = node.fontSize;
 
-    // nếu bạn có muốn apply style lên chính element ngay
-    this.updateNodeStyle(node);
-  },
+      // nếu bạn có muốn apply style lên chính element ngay
+      this.updateNodeStyle(node);
+    },
 
-  // tương tự với link
-  handleLinkClick(link) {
-    this.selectionLink(link);
-  },
+    // tương tự với link
+    handleLinkClick(link) {
+      this.selectionLink(link);
+    },
 
-  selectionLink(link) {
-    this.selectedLink     = link;
-    this.selectedNode     = null;                  // clear node selection
-    this.linkColor        = link.color;
-    this.linkThickness    = link.thickness;
-    this.linkDash         = link.dash;
-    this.linkCurvature    = link.curvature;
-    this.linkMarker       = link.marker;
-  },
+    selectionLink(link) {
+      this.selectedLink = link;
+      this.selectedNode = null;                  // clear node selection
+      this.linkColor = link.color;
+      this.linkThickness = link.thickness;
+      this.linkDash = link.dash;
+      this.linkCurvature = link.curvature;
+      this.linkMarker = link.marker;
+    },
 
-  initSelection() {
-    if (this.nodes.length) this.selectNode(this.nodes[0]);
-    if (this.links.length) this.selectionLink(this.links[0]);
-  },
+    initSelection() {
+      if (this.nodes.length) this.selectNode(this.nodes[0]);
+      if (this.links.length) this.selectionLink(this.links[0]);
+    },
     dragStart(type) {
       this.currentDrag = type;
     },
@@ -2068,41 +2281,41 @@ export default {
     },
     removeNode(nodeToRemove) {
       this.pushHistory();
-    // 1) Xác định node mục tiêu (nếu không truyền vào thì lấy selected)
-    const target = nodeToRemove || this.selectedNode;
-    if (!target) return;
+      // 1) Xác định node mục tiêu (nếu không truyền vào thì lấy selected)
+      const target = nodeToRemove || this.selectedNode;
+      if (!target) return;
 
-    // 2) Tập hợp tất cả id cần xoá (target + descendants)
-    const toDelete = new Set([target.id]);
-    let changed;
-    do {
-      changed = false;
-      this.links.forEach(l => {
-        if (toDelete.has(l.from) && !toDelete.has(l.to)) {
-          toDelete.add(l.to);
-          changed = true;
-        }
-      });
-    } while (changed);
+      // 2) Tập hợp tất cả id cần xoá (target + descendants)
+      const toDelete = new Set([target.id]);
+      let changed;
+      do {
+        changed = false;
+        this.links.forEach(l => {
+          if (toDelete.has(l.from) && !toDelete.has(l.to)) {
+            toDelete.add(l.to);
+            changed = true;
+          }
+        });
+      } while (changed);
 
-    // 3) Lọc nodes, links
-    this.nodes = this.nodes.filter(n => !toDelete.has(n.id));
-    this.links = this.links.filter(
-      l => !toDelete.has(l.from) && !toDelete.has(l.to)
-    );
+      // 3) Lọc nodes, links
+      this.nodes = this.nodes.filter(n => !toDelete.has(n.id));
+      this.links = this.links.filter(
+        l => !toDelete.has(l.from) && !toDelete.has(l.to)
+      );
 
-    // 4) Reset selection & linking
-    this.selectedNode = null;
-    this.selectedLink = null;
-    if (this.linking) {
-      this.linking.active   = false;
-      this.linking.fromNode = null;
-      this.linking.tempPos  = { x: 0, y: 0 };
-    }
+      // 4) Reset selection & linking
+      this.selectedNode = null;
+      this.selectedLink = null;
+      if (this.linking) {
+        this.linking.active = false;
+        this.linking.fromNode = null;
+        this.linking.tempPos = { x: 0, y: 0 };
+      }
 
-    // 5) Đẩy lịch sử nếu cần
-    this.pushHistory();
-  },
+      // 5) Đẩy lịch sử nếu cần
+      this.pushHistory();
+    },
     uploadImage() {
       document.getElementById('imageUploader').click();
     },
@@ -2141,6 +2354,8 @@ export default {
         document.execCommand('bold');
         this.updateNodeStyle(this.selectedNode);
         this.updateText(this.selectedNode);
+      } else if (this.selectedLink) {
+        this.selectedLink.isBold = !this.selectedLink.isBold;
       }
     },
 
@@ -2150,6 +2365,8 @@ export default {
         document.execCommand('italic');
         this.updateNodeStyle(this.selectedNode);
         this.updateText(this.selectedNode);
+      } else if (this.selectedLink) {
+        this.selectedLink.isItalic = !this.selectedLink.isItalic;
       }
     },
 
@@ -2158,6 +2375,8 @@ export default {
         this.selectedNode.fontFamily = this.selectedFont;
         this.updateNodeStyle(this.selectedNode);
         this.updateText(this.selectedNode);
+      } else if (this.selectedLink) {
+        this.selectedLink.fontFamily = this.selectedFont;
       }
     },
 
@@ -2166,9 +2385,19 @@ export default {
         this.selectedNode.textColor = this.selectedColor;
         this.updateNodeStyle(this.selectedNode);
         this.updateText(this.selectedNode);
+      } else if (this.selectedLink) {
+        this.selectedLink.textColor = this.selectedColor;
       }
     },
-
+    applyFontSize() {
+      if (this.selectedNode) {
+        this.selectedNode.fontSize = this.selectedFontSize;
+        this.updateNodeStyle(this.selectedNode);
+        this.updateText(this.selectedNode);
+      } else if (this.selectedLink) {
+        this.selectedLink.fontSize = this.selectedFontSize;
+      }
+    },
     setAlign(dir) {
       if (this.selectedNode) {
         this.selectedNode.align = dir;
@@ -2180,6 +2409,13 @@ export default {
         );
         this.updateNodeStyle(this.selectedNode);
         this.updateText(this.selectedNode);
+      } else if (this.selectedLink) {
+        // Map dir thành đúng giá trị cho link
+        let linkDir = 'middle';
+        if (dir === 'left') linkDir = 'start';
+        else if (dir === 'center') linkDir = 'middle';
+        else if (dir === 'right') linkDir = 'end';
+        this.selectedLink.align = linkDir;
       }
     },
 
@@ -2194,10 +2430,10 @@ export default {
         el.style.fontFamily = node.fontFamily || '';
         el.style.color = node.textColor;
         el.style.textAlign = node.align || 'center';
+        el.style.fontSize = `${node.fontSize}px` || `12px`;
       });
     },
     updateNode(node) {
-      this.drawFreeMap(this.svg);
       if (!node || node.id == null) {
         console.warn('Không có node để cập nhật', node);
         return;
@@ -2209,7 +2445,7 @@ export default {
       console.log('updateNodeStyle', node.id, node.borderWidth);
       const sel = d3.select(this.$refs.canva)
         .select(`g.node-group[data-id='${node.id}']`);
-      console.log(d3.select(this.$refs.canvas).selectAll('g.node-group').nodes());
+      console.log(d3.select(this.$refs.canva).selectAll('g.node-group').nodes());
       if (sel.empty()) {
         console.warn('Không tìm thấy node-group với id', node.id);
         return;
@@ -2230,14 +2466,13 @@ export default {
         .select(`g.node-group[data-id='${node.id}']`);
       sel.select('text')
         // .attr('text-anchor',    node.align)
-        .attr('font-size', `${node.fontSize}px`)
+        .attr('font-size', node.fontSize)
         .attr('font-weight', node.isBold ? 'bold' : 'normal')
         .attr('font-style', node.isItalic ? 'italic' : 'normal')
         .style('fill', node.textColor)
         .attr('font-family', node.fontFamily);
     },
     updateLink(link) {
-      this.drawFreeMap(this.svg);
       if (!link || link.from == null) return;  // << guard ở đây
       const sel = d3.select(this.$refs.canvas)
         // .select(`line[data-from='${link.from}'][data-to='${link.to}']`)
@@ -2267,12 +2502,18 @@ export default {
       const cy = this.draggingNode.top + this.draggingNode.height / 2;
 
       // cập nhật các link gắn vào node này
+      let moved = false;
       this.links.forEach(link => {
-        if (link.attachedTo === this.draggingNode.id) {
+        if (link.attachedTo === this.draggingNode.id && link.toPos) {
           link.toPos.x = cx;
           link.toPos.y = cy;
+          link.path = this.computeLinkPath(link);
+          moved = true;
         }
       });
+      if (!moved) {
+        console.log('')
+      }
     },
     stopDragNode() {
       window.removeEventListener('mousemove', this.doDragNode);
@@ -2377,6 +2618,7 @@ export default {
           fontFamily: node.fontFamily || '',
           color: node.textColor || '#000',
           textAlign: node.align || 'center',
+          fontSize: `${node.fontSize}px`,
         };
       }
       const borderColor = node.borderColor || this.defaultNodeBorderColor;
@@ -2440,7 +2682,6 @@ export default {
       const el = document.elementFromPoint(evt.clientX, evt.clientY);
       const nodeEl = el && el.closest('.node');
       const rect = this.$refs.canvas.getBoundingClientRect();
-      if(!nodeEl) alert('Không thể nối ạ!!!')
       if (nodeEl) {
         // nối node→node
         const toId = Number(nodeEl.dataset.id);
@@ -2458,7 +2699,14 @@ export default {
           thickness: this.defaultLinkThickness,
           dash: this.defaultLinkDash,
           curvature: this.defaultLinkCurvature,
-          marker: this.defaultLinkMarker
+          marker: this.defaultLinkMarker,
+          text: '',
+          isBold: false,
+          isItalic: false,
+          align: 'middle',
+          textColor: this.selectedColor,
+          fontSize: 12,
+          fontFamily: 'Arial'
         });
       } else {
         // nối node→free‐pos
@@ -2477,7 +2725,14 @@ export default {
           thickness: this.defaultLinkThickness,
           dash: this.defaultLinkDash,
           curvature: this.defaultLinkCurvature,
-          marker: this.defaultLinkMarker
+          marker: this.defaultLinkMarker,
+          text: '',
+          isBold: false,
+          isItalic: false,
+          align: 'middle',
+          textColor: this.selectedColor,
+          fontSize: 12,
+          fontFamily: 'Arial'
         });
       }
 
@@ -2643,7 +2898,7 @@ template {
   width: 280px;
   padding: 20px;
   height: 100%;
-  background: white;
+  background: radial-gradient(rgb(173, 252, 252), white);
   border-right: 1px solid #e5e7eb;
   overflow-y: auto;
 }
@@ -2750,8 +3005,9 @@ template {
   border-left: 1px solid #e5e7eb;
   padding: 30px auto;
   width: 100%;
-  height:1050px;
+  height: 2050px;
 }
+
 .link-canvas {
   position: absolute;
   top: 0;

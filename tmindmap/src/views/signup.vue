@@ -21,6 +21,7 @@
     </div>
 </template>
 <script>
+import { authState } from '../authState'; // Đảm bảo alias @ trỏ đến src
 import { auth, googleProvider, facebookProvider, signInWithPopup } from '../firebase';
 export default{
     name:"SignUp",
@@ -39,7 +40,7 @@ export default{
   methods: {
     async signup() {
       try {
-        const response = await fetch('http://localhost:5000/api/auth/signup', {
+        const response = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -62,37 +63,84 @@ export default{
           } else {
               this.errorMessage = data.message; // hiển thị lỗi
           }
-          console.log(this.form);
         }
       } catch (error) {
         console.error(error);
         alert('Đã xảy ra lỗi!');
       }
     },
-    async loginWithGoogle(){
-      try{
-        const result = await signInWithPopup(auth,googleProvider);
-        console.log('Google login success',result.user);
-      }catch(error){
-        if(error.code==='auth/cancelled-popup-request'){
-          this.errorMessage = 'Đăng nhập băng Google bị hủy. Vui lòng thử lại.';
-        }else if(error.code==='auth/popup-closed-by-user'){
-          this.errorMessage='Bạn đã đóng cửa sổ đăng nhập. Vui lòng thử lại sau.';
-        }else{
+    async loginWithGoogle() {
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const user = result.user;
+        const idToken = await user.getIdToken();
+
+        // Lưu vào localStorage
+        localStorage.setItem('token', idToken);
+        localStorage.setItem('provider', 'google');
+        localStorage.setItem('userName', user.displayName);
+        localStorage.setItem('userEmail', user.email);
+        localStorage.setItem('userIcon', user.photoURL);
+        const res = await fetch('/saveUser', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: user.uid,
+            name: user.displayName,
+            email: user.email,
+            photoURL: user.photoURL,
+            provider: 'google'
+          })
+        });
+        // Update reactive authState
+        authState.token = localStorage.getItem('token');
+        authState.userName = localStorage.getItem('userName');
+        authState.userIcon = localStorage.getItem('userIcon');
+        this.$router.push('/');
+      } catch (error) {
+        if (error.code === 'auth/cancelled-popup-request') {
+          this.errorMessage = 'Đăng nhập với Google bị hủy. Vui lòng thử lại.';
+        } else if (error.code === 'auth/popup-closed-by-user') {
+          this.errorMessage = 'Bạn đã đóng cửa sổ đăng nhập. Vui lòng thử lại sau.';
+        } else {
           this.errorMessage = error.message;
         }
       }
     },
-    async loginWithFacebook(){
-      try{
-        const result = await signInWithPopup(auth,facebookProvider);
-        console.log('Facebook login success',result.user);
-      }catch(error){
-        if(error.code==='auth/cancelled-popup-request'){
-          this.errorMessage = 'Đăng nhập băng Facebook bị hủy. Vui lòng thử lại.';
-        }else if(error.code==='auth/popup-closed-by-user'){
-          this.errorMessage='Bạn đã đóng cửa sổ đăng nhập. Vui lòng thử lại sau.';
-        }else{
+    async loginWithFacebook() {
+      try {
+        const result = await signInWithPopup(auth, facebookProvider);
+        localStorage.setItem('provider', 'facebook');
+        const user = result.user;
+        const idToken = await user.getIdToken();
+
+        localStorage.setItem('token', idToken);
+        localStorage.setItem('provider', 'facebook');
+        localStorage.setItem('userName', user.displayName);
+        localStorage.setItem('userIcon', user.photoURL);
+        localStorage.setItem('userEmail', user.email);
+        await fetch('/api/auth/saveUser', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: user.uid,
+            name: user.displayName,
+            email: user.email,
+            photoURL: user.photoURL,
+            provider: 'facebook'
+          })
+        });
+        // Update reactive authState
+        authState.token = localStorage.getItem('token');
+        authState.userName = localStorage.getItem('userName');
+        authState.userIcon = localStorage.getItem('userIcon');
+        this.$router.push('/');
+      } catch (error) {
+        if (error.code === 'auth/cancelled-popup-request') {
+          this.errorMessage = 'Đăng nhập với Facebook bị hủy. Vui lòng thử lại.';
+        } else if (error.code === 'auth/popup-closed-by-user') {
+          this.errorMessage = 'Bạn đã đóng cửa sổ đăng nhập. Vui lòng thử lại sau.';
+        } else {
           this.errorMessage = error.message;
         }
       }

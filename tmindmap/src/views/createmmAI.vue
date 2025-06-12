@@ -132,7 +132,7 @@ export default {
   async fetchSuggestions() {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:5000/api/listMindmap', {
+        const res = await fetch('/api/listMindmap', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!res.ok) throw new Error(res.statusText);
@@ -163,10 +163,11 @@ export default {
       form.append('withImage', this.selectOption === 'with-image')
       if (this.file) form.append('file', this.file)
       try {
-        const res = await fetch('http://localhost:5000/api/generateMindmap', { method: 'POST', body: form })
+        const res = await fetch('/api/generateMindmap', { method: 'POST', body: form })
         const data = await res.json()
         this.mindmapObject = data.mindmap
         this.drawMindMap()
+        this.topic = ''
         // nếu API trả sẵn ảnh
         if (data.image) {
           this.selectedImageUrl = data.image
@@ -260,7 +261,7 @@ _generateImageFromSvg() {
     };
 
     // 3. Gọi API
-    const resp = await fetch('http://localhost:5000/api/listMindmap', {
+    const resp = await fetch('/api/listMindmap', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -655,6 +656,8 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
   // 1) reset + marker arrow
   svg.selectAll('*').remove();
   const defs = svg.append('defs');
+
+  // --- Định nghĩa marker arrow ---
   defs.append('marker')
     .attr('id','arrow')
     .attr('viewBox','0 -5 10 10')
@@ -664,6 +667,20 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
     .append('path')
       .attr('d','M0,-5L10,0L0,5')
       .attr('fill','#888');
+
+  // --- Định nghĩa gradient cho node ---
+  // Linear gradient từ trắng sang xanh nhẹ (có thể thay màu tuỳ ý)
+  const grad = defs.append('linearGradient')
+    .attr('id', 'nodeGradient')
+    .attr('x1', '0%').attr('y1', '0%')
+    .attr('x2', '100%').attr('y2', '100%');
+
+  grad.append('stop')
+    .attr('offset', '0%')
+    .attr('stop-color', '#ffffff'); // Trắng ở góc trên-trái
+  grad.append('stop')
+    .attr('offset', '100%')
+    .attr('stop-color', '#e0f7fa'); // Xanh nhạt ở góc dưới-phải
 
   // 2) container + zoom/pan
   const offsetX = 200, offsetY = 20;
@@ -695,10 +712,10 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
       .attr('class', 'link')
       .attr('d', linkGen)
       .attr('fill','none')
-      .attr('stroke','#999')
+      .attr('stroke','aqua')        // Chuyển thành màu aqua
       .attr('stroke-width',2)
       .attr('marker-end','url(#arrow)')
-      // chuẩn bị animation
+      // Chuẩn bị animation
       .attr('stroke-dasharray', function() {
         const L = this.getTotalLength();
         return `${L} ${L}`;
@@ -707,7 +724,7 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
         return this.getTotalLength();
       })
     .transition()
-      // delay theo depth để vẽ từ gốc trước, ra xa sau
+      // Delay theo depth để vẽ từ gốc trước, ra xa sau
       .delay(d => d.source.depth * 300)
       .duration(600)
       .ease(d3.easeLinear)
@@ -732,12 +749,18 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
         return `translate(${d.y + extraX},${d.x})`;
       });
 
-  // 8) root node
-  nodes.filter(d => d.depth === 0)
-    .each((d,i,els) => {
-      const nd = d3.select(els[i]);
-      const lines = wrap4(d.data.name);
-      const font = '16px sans-serif';
+  // 8) tất cả node (kể cả root và non-root) sẽ dùng gradient làm fill
+  nodes.each((d, i, els) => {
+    const nd = d3.select(els[i]);
+    const lines = wrap4(d.data.name);
+    // Font size giảm dần theo depth; root (depth=0) sẽ to nhất
+    const baseSize = 20; // bạn có thể tăng hoặc giảm baseSize tuỳ thích
+    const fontSize = Math.max(8, baseSize - d.depth * 2); 
+    const font = `${fontSize}px sans-serif`;
+
+    if (d.depth === 0) {
+      // --- Root node: vẽ circle ---
+      // Tính toán kích thước circle dựa vào độ rộng text
       const maxW = Math.min(200,
         Math.max(...lines.map(l => vm.textWidth(l, font)))
       );
@@ -745,10 +768,11 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
 
       nd.append('circle')
         .attr('r', r)
-        .attr('fill','#fff')
+        .attr('fill', 'url(#nodeGradient)')    // fill bằng gradient
         .attr('stroke','#333')
         .attr('stroke-width',4);
 
+      // Thêm text ở giữa
       const textEl = nd.append('text')
         .attr('text-anchor','middle')
         .attr('dominant-baseline','middle')
@@ -758,70 +782,56 @@ wrapText(textSel, maxWidth, lineHeight = 1.2) {
       lines.forEach((ln, idx) => {
         textEl.append('tspan')
           .attr('x', 0)
-          .attr('dy', idx===0 ? `-${(lines.length-1)*0.6}em` : '1.2em')
+          .attr('dy', idx === 0 ? `-${(lines.length-1)*0.6}em` : '1.2em')
           .text(ln);
       });
-    });
-
-  // 9) non-root nodes (depth >= 1)
-  nodes.filter(d => d.depth >= 1)
-    .each((d,i,els) => {
-      const nd = d3.select(els[i]);
-      const lines = wrap4(d.data.name);
-      const font = '12px sans-serif';
+    } else {
+      // --- Non-root nodes: vẽ rect ---
       const padH = 6, padV = 4;
-      const maxW = Math.max(...lines.map(l => vm.textWidth(l,font)));
-      const wRect = maxW + padH*6;
-      const hRect = lines.length*20 + padV*2;
+      const maxW = Math.max(...lines.map(l => vm.textWidth(l, font)));
+      const wRect = maxW + padH * 6;
+      const hRect = lines.length * 20 + padV * 2;
 
       nd.append('rect')
-        .attr('x', d.children ? -wRect-4 : 4)
+        .attr('x', d.children ? -wRect - 4 : 4)
         .attr('y', -hRect/2)
         .attr('width', wRect)
         .attr('height', hRect)
         .attr('rx', 4).attr('ry', 4)
-        .attr('fill','#f9f9f9')
+        .attr('fill', 'url(#nodeGradient)')   // fill bằng gradient
         .attr('stroke','#007bff')
         .attr('stroke-width',1.5);
 
+      // Thêm text bên trong rect
       const textEl = nd.append('text')
         .attr('text-anchor', d.children ? 'end' : 'start')
         .attr('dominant-baseline','middle')
         .style('font-size', font);
-        if (this.includeImage && this.leafImages[d.data.name]) {
-      const xOff = d.children
-        ? -wRect - 10 // trái
-        : wRect + 10;      // phải
-      nd.append('image')
-        .attr('href', this.leafImages[d.data.name])
-        .attr('x', xOff)
-        .attr('y', -hRect / 2)
-        .attr('width', 50)
-        .attr('height', 50);
-    }
+
+      // Nếu có bật includeImage và có ảnh
+      if (this.includeImage && this.leafImages[d.data.name]) {
+        const xOff = d.children
+          ? -wRect - 10  // nếu có children: ảnh nằm bên trái
+          : wRect + 10;  // ngược lại: ảnh bên phải
+        nd.append('image')
+          .attr('href', this.leafImages[d.data.name])
+          .attr('x', xOff)
+          .attr('y', -hRect / 2)
+          .attr('width', 50)
+          .attr('height', 50);
+      }
+
       lines.forEach((ln, idx) => {
         textEl.append('tspan')
-          .attr('x', d.children ? -padH-4 : padH+4)
-          .attr('dy', idx===0 ? `-${(lines.length-1)*0.6}em` : '1.2em')
+          .attr('x', d.children ? -padH - 4 : padH + 4)
+          .attr('dy', idx === 0 ? `-${(lines.length-1)*0.6}em` : '1.2em')
           .text(ln);
       });
-    });
-    if (this.includeImage) {
-      const leafSelection = nodes
-  .filter(d => 
-    !d.children &&
-    this.includeImage &&
-    this.leafImages[d.data.name]
-  );
+    }
+  });
 
-console.log('Leaf nodes for image:', leafSelection.size()); 
-      leafSelection.append('image')
-      .attr('href', d => this.leafImages[d.data.name])
-      .attr('x', 25)
-      .attr('y', -25)
-      .attr('width', 50)
-      .attr('height', 50);
-  }
+  // 9) (Nếu bạn chỉ muốn thêm ảnh cho leaf nodes, đã được xử lý ở trên)
+  // Không cần đoạn code thêm image phía ngoài nữa vì đã gộp chung vào trên.
 },
 drawMultiFlowMap(svg) {
   const vm = this;
@@ -831,6 +841,8 @@ drawMultiFlowMap(svg) {
   // 1) Clear & marker
   svg.selectAll('*').remove();
   const defs = svg.append('defs');
+
+  // --- Định nghĩa marker arrow ---
   defs.append('marker')
     .attr('id', 'arrow')
     .attr('viewBox', '0 -5 10 10')
@@ -842,6 +854,18 @@ drawMultiFlowMap(svg) {
     .append('path')
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#888');
+
+  // --- Định nghĩa gradient cho node ---
+  const grad = defs.append('linearGradient')
+    .attr('id', 'nodeGradient')
+    .attr('x1', '0%').attr('y1', '0%')
+    .attr('x2', '100%').attr('y2', '100%');
+  grad.append('stop')
+    .attr('offset', '0%')
+    .attr('stop-color', '#ffffff'); // Trắng ở góc trên-trái
+  grad.append('stop')
+    .attr('offset', '100%')
+    .attr('stop-color', '#e0f7fa'); // Xanh nhạt ở góc dưới-phải
 
   // 2) Container + zoom/pan
   const g = svg.append('g')
@@ -884,23 +908,27 @@ drawMultiFlowMap(svg) {
 
   // 7) Root metrics & shift
   const rootLines  = wrap4(treeObj.name);
-  const font0      = '16px sans-serif';
-  const maxRW      = Math.min(200, Math.max(...rootLines.map(l => vm.textWidth(l,font0))));
+  const baseSize   = 20;         // Kích thước font gốc cho root (depth = 0)
+  const font0      = `${baseSize}px sans-serif`;
+  const maxRW      = Math.min(200, Math.max(...rootLines.map(l => vm.textWidth(l, font0))));
   const r0         = maxRW / 2 + 20;
   const rootShiftX = 30;
 
-  // 8) Text & marker params
-  const textFont    = '12px sans-serif';
-  const padH        = 6;
-  const padV        = 4;
+  // 8) Marker & margin params
+  const padH         = 6;
+  const padV         = 4;
   const markerAdjust = 4;
   const marginLeft   = -80;
   const marginRight  = 100;
 
-  // compute arrow shift to touch node border
-  function computeShift(name) {
+  // computeShift: để căn chỉnh vị trí mũi tên chạm đúng biên node
+  function computeShift(name, depth) {
+    // depth ở đây là depth tính theo cây nhỏ (subtree).
+    // Font size cũng tính dựa vào depth
+    const fontSize = Math.max(8, baseSize - depth * 2);
+    const font = `${fontSize}px sans-serif`;
     const lines = wrap4(name);
-    const maxW = Math.max(...lines.map(l => vm.textWidth(l,textFont)));
+    const maxW = Math.max(...lines.map(l => vm.textWidth(l, font)));
     const rectW = maxW + padH * 6;
     return rectW / 2 + markerAdjust;
   }
@@ -910,46 +938,66 @@ drawMultiFlowMap(svg) {
     const linkGen = d3.linkHorizontal()
       .x(d => flip ? -d.y : d.y)
       .y(d => d.x);
+
     g.append('g').selectAll('path.link').data(root.links()).enter().append('path')
       .attr('class','link')
       .attr('fill','none')
-      .attr('stroke','#999')
+      .attr('stroke','aqua')          // Chuyển sang màu aqua
       .attr('stroke-width',2)
       .attr('marker-end','url(#arrow)')
-      .attr('stroke-dasharray', function(){ const L = this.getTotalLength(); return `${L} ${L}`; })
-      .attr('stroke-dashoffset', function(){ return this.getTotalLength(); })
+      .attr('stroke-dasharray', function() {
+        const L = this.getTotalLength();
+        return `${L} ${L}`;
+      })
+      .attr('stroke-dashoffset', function() {
+        return this.getTotalLength();
+      })
       .attr('d', d => {
+        // Tính toán vị trí nguồn và đích, căn giữa theo mid
         const vSrc = d.source.x - (flip ? rightMid : leftMid);
         const vTgt = d.target.x - (flip ? rightMid : leftMid);
-        const hSrc = d.source.y + (d.source.depth===0 ? (flip ? -r0 : r0) : 0);
+
+        // Đối với source (nút cha), nếu depth = 0 (root của subtree),
+        // cần cộng thêm bán kính r0 để link chạm đúng biên
+        const hSrc = d.source.y + (d.source.depth === 0 ? (flip ? -r0 : r0) : 0);
+
+        // Đối với target, căn chỉnh để mũi tên chạm đúng biên rect
         let hTgt = d.target.y;
-        const shift = computeShift(d.target.data.name);
-        if (!flip && d.target.depth===1) hTgt += shift;
-        if (flip && !d.target.children) hTgt -= shift;
-        return linkGen({ source:{x:vSrc,y:hSrc}, target:{x:vTgt,y:hTgt} });
+        const shift = computeShift(d.target.data.name, d.target.depth);
+        if (!flip && d.target.depth === 1)       hTgt += shift;
+        if (flip && !d.target.children)          hTgt -= shift;
+
+        return linkGen({
+          source: { x: vSrc, y: hSrc },
+          target: { x: vTgt, y: hTgt }
+        });
       })
-      .transition().delay(d=>d.source.depth*300).duration(600).ease(d3.easeLinear)
-      .attr('stroke-dashoffset',0);
+      .transition()
+        .delay(d => d.source.depth * 300)
+        .duration(600)
+        .ease(d3.easeLinear)
+        .attr('stroke-dashoffset', 0);
   };
-  doLinks(leftRoot,true);
-  doLinks(rightRoot,false);
+  doLinks(leftRoot, true);
+  doLinks(rightRoot, false);
 
   // 10) Draw root above links
-  const rootG = g.append('g').attr('transform',`translate(${rootShiftX},0)`);
+  const rootG = g.append('g').attr('transform', `translate(${rootShiftX},0)`);
   rootG.append('circle')
-    .attr('r',r0)
-    .attr('fill','#fff')
-    .attr('stroke','#333')
-    .attr('stroke-width',4);
+    .attr('r', r0)
+    .attr('fill', 'url(#nodeGradient)') // Fill bằng gradient
+    .attr('stroke', '#333')
+    .attr('stroke-width', 4);
+
   const rt = rootG.append('text')
-    .attr('text-anchor','middle')
-    .attr('dominant-baseline','middle')
-    .style('font-size',font0)
-    .style('font-weight','bold');
-  rootLines.forEach((ln,i)=>{
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .style('font-size', font0)
+    .style('font-weight', 'bold');
+  rootLines.forEach((ln, i) => {
     rt.append('tspan')
-      .attr('x',0)
-      .attr('dy',i===0?`-${(rootLines.length-1)*0.6}em`:'1.2em')
+      .attr('x', 0)
+      .attr('dy', i === 0 ? `-${(rootLines.length - 1) * 0.6}em` : '1.2em')
       .text(ln);
   });
 
@@ -957,44 +1005,56 @@ drawMultiFlowMap(svg) {
   const doNodes = (root, flip) => {
     g.append('g').selectAll('g.node').data(root.descendants().slice(1)).enter().append('g')
       .attr('class','node')
-      .attr('transform', d=>{
-        const v = d.x - (flip? rightMid: leftMid);
+      .attr('transform', d => {
+        const v = d.x - (flip ? rightMid : leftMid);
         let h = d.y;
-        if (!flip && d.depth===1) h += marginRight;
-        if (flip && !d.children) h -= marginLeft;
-        const x = flip? -h: h;
+        if (!flip && d.depth === 1)  h += marginRight;
+        if (flip && !d.children)      h -= marginLeft;
+        const x = flip ? -h : h;
         return `translate(${x},${v})`;
       })
-      .each(function(d){
+      .each(function(d) {
         const nd = d3.select(this);
         const lines = wrap4(d.data.name);
-        const maxW = Math.max(...lines.map(l=>vm.textWidth(l,textFont)));
-        const wRect = maxW + padH * 8;
-        const hRect = lines.length*20 + padV*2;
+
+        // --- Tính font size giảm dần theo depth ---
+        const fontSize = Math.max(8, baseSize - d.depth * 2);
+        const textFont = `${fontSize}px sans-serif`;
+
+        // Tính kích thước rect dựa vào textFont
+        const maxW = Math.max(...lines.map(l => vm.textWidth(l, textFont)));
+        const wRect = maxW + padH * 6;
+        const hRect = lines.length * 20 + padV * 2;
+
+        // Vẽ rect với gradient
         nd.append('rect')
-          .attr('x',d.children? -wRect-4:4)
-          .attr('y',-hRect/2)
-          .attr('width',wRect)
-          .attr('height',hRect)
-          .attr('rx',4).attr('ry',4)
-          .attr('fill','#f9f9f9')
-          .attr('stroke','#007bff')
-          .attr('stroke-width',1.5);
+          .attr('x', d.children ? -wRect - 4 : 4)
+          .attr('y', -hRect / 2)
+          .attr('width', wRect)
+          .attr('height', hRect)
+          .attr('rx', 4).attr('ry', 4)
+          .attr('fill', 'url(#nodeGradient)')  // background gradient
+          .attr('stroke', '#007bff')
+          .attr('stroke-width', 1.5);
+
+        // Thêm text bên trong rect, với font size đã tính
         const t = nd.append('text')
-          .attr('text-anchor',d.children?'end':'start')
-          .attr('dominant-baseline','middle')
-          .style('font-size',textFont);
-        lines.forEach((ln,i)=>{
+          .attr('text-anchor', d.children ? 'end' : 'start')
+          .attr('dominant-baseline', 'middle')
+          .style('font-size', textFont);
+
+        lines.forEach((ln, i) => {
           t.append('tspan')
-            .attr('x', d.children? -padH-4:padH+4)
-            .attr('dy', i===0?`-${(lines.length-1)*0.6}em`:'1.2em')
+            .attr('x', d.children ? -padH - 4 : padH + 4)
+            .attr('dy', i === 0 ? `-${(lines.length - 1) * 0.6}em` : '1.2em')
             .text(ln);
         });
       });
   };
-  doNodes(leftRoot,true);
-  doNodes(rightRoot,false);
+  doNodes(leftRoot, true);
+  doNodes(rightRoot, false);
 },
+
 drawBraceMap(svg) {
   const w = svg.node().clientWidth;
   const h = svg.node().clientHeight;
@@ -1140,7 +1200,7 @@ drawBraceMap(svg) {
 
 .left-panel {
   width: 20%;
-  background: #f0f0f0;
+  background: radial-gradient(rgb(173, 252, 252),white);
   padding: 16px;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -1310,7 +1370,7 @@ input[type="text"] {
   color:black;
 }
 .AI{
-  background-color: rgb(177,182,189);
+  background: radial-gradient(rgb(173, 252, 252),white);
 }
 .mindmap-svg {
   width: 100%;
