@@ -85,7 +85,7 @@ export default {
     async signin() {
       this.errorMessage = '';
       try {
-        const response = await fetch('http://localhost:5000/signin', {
+        const response = await fetch('/signin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -97,7 +97,6 @@ export default {
         if (response.ok) {
           // Lưu thông tin đăng nhập vào localStorage
           localStorage.setItem('token', data.token);
-          console.log(data.token);
           localStorage.setItem('userName', data.user.name);
           localStorage.setItem('userIcon', data.user.photoURL);
           localStorage.setItem('provider', 'local');
@@ -117,7 +116,6 @@ export default {
     async loginWithGoogle() {
       try {
         const result = await signInWithPopup(auth, googleProvider);
-        console.log('Google login success', result.user);
         const user = result.user;
         const idToken = await user.getIdToken();
 
@@ -127,7 +125,7 @@ export default {
         localStorage.setItem('userName', user.displayName);
         localStorage.setItem('userEmail', user.email);
         localStorage.setItem('userIcon', user.photoURL);
-        const res = await fetch('http://localhost:5000/saveUser', {
+        const res = await fetch('/saveUser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -138,7 +136,6 @@ export default {
             provider: 'google'
           })
         });
-        console.log('Response from saveUser:', await res.text());
         // Update reactive authState
         authState.token = localStorage.getItem('token');
         authState.userName = localStorage.getItem('userName');
@@ -158,7 +155,6 @@ export default {
       try {
         const result = await signInWithPopup(auth, facebookProvider);
         localStorage.setItem('provider', 'facebook');
-        console.log('Facebook login success', result.user);
         const user = result.user;
         const idToken = await user.getIdToken();
 
@@ -167,7 +163,7 @@ export default {
         localStorage.setItem('userName', user.displayName);
         localStorage.setItem('userIcon', user.photoURL);
         localStorage.setItem('userEmail', user.email);
-        await fetch('http://localhost:5000/api/auth/saveUser', {
+        await fetch('/api/auth/saveUser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -212,7 +208,7 @@ export default {
       this.errorMessage = '';
       try {
         const payload = { email: this.identifier };
-        const response = await fetch('http://localhost:5000/api/auth/forgot-password', {
+        const response = await fetch('/api/auth/forgot-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -235,7 +231,7 @@ export default {
     async verifyCode() {
       this.errorMessage = '';
       try {
-        const response = await fetch('http://localhost:5000/api/auth/verify-code', {
+        const response = await fetch('/api/auth/verify-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: this.userId, code: this.code })
@@ -259,7 +255,7 @@ export default {
         return;
       }
       try {
-        const response = await fetch('http://localhost:5000/api/auth/reset-password', {
+        const response = await fetch('/api/auth/reset-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

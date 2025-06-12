@@ -40,7 +40,7 @@ export default{
   methods: {
     async signup() {
       try {
-        const response = await fetch('http://localhost:5000/api/auth/signup', {
+        const response = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -63,7 +63,6 @@ export default{
           } else {
               this.errorMessage = data.message; // hiển thị lỗi
           }
-          console.log(this.form);
         }
       } catch (error) {
         console.error(error);
@@ -73,7 +72,6 @@ export default{
     async loginWithGoogle() {
       try {
         const result = await signInWithPopup(auth, googleProvider);
-        console.log('Google login success', result.user);
         const user = result.user;
         const idToken = await user.getIdToken();
 
@@ -83,7 +81,7 @@ export default{
         localStorage.setItem('userName', user.displayName);
         localStorage.setItem('userEmail', user.email);
         localStorage.setItem('userIcon', user.photoURL);
-        const res = await fetch('http://localhost:5000/saveUser', {
+        const res = await fetch('/saveUser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -94,7 +92,6 @@ export default{
             provider: 'google'
           })
         });
-        console.log('Response from saveUser:', await res.text());
         // Update reactive authState
         authState.token = localStorage.getItem('token');
         authState.userName = localStorage.getItem('userName');
@@ -114,7 +111,6 @@ export default{
       try {
         const result = await signInWithPopup(auth, facebookProvider);
         localStorage.setItem('provider', 'facebook');
-        console.log('Facebook login success', result.user);
         const user = result.user;
         const idToken = await user.getIdToken();
 
@@ -123,7 +119,7 @@ export default{
         localStorage.setItem('userName', user.displayName);
         localStorage.setItem('userIcon', user.photoURL);
         localStorage.setItem('userEmail', user.email);
-        await fetch('http://localhost:5000/api/auth/saveUser', {
+        await fetch('/api/auth/saveUser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

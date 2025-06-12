@@ -132,7 +132,7 @@ export default {
   async fetchSuggestions() {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:5000/api/listMindmap', {
+        const res = await fetch('/api/listMindmap', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!res.ok) throw new Error(res.statusText);
@@ -163,7 +163,7 @@ export default {
       form.append('withImage', this.selectOption === 'with-image')
       if (this.file) form.append('file', this.file)
       try {
-        const res = await fetch('http://localhost:5000/api/generateMindmap', { method: 'POST', body: form })
+        const res = await fetch('/api/generateMindmap', { method: 'POST', body: form })
         const data = await res.json()
         this.mindmapObject = data.mindmap
         this.drawMindMap()
@@ -261,7 +261,7 @@ _generateImageFromSvg() {
     };
 
     // 3. Gọi API
-    const resp = await fetch('http://localhost:5000/api/listMindmap', {
+    const resp = await fetch('/api/listMindmap', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

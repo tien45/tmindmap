@@ -381,7 +381,7 @@ export default {
     this.loading = true;
     try {
       const resp = await fetch(
-        `http://localhost:5000/api/listMindmap/${id}`,
+        `/api/listMindmap/${id}`,
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
       const result = await resp.json();
@@ -813,8 +813,8 @@ export default {
       console.log('id', id)
       const isUpdate = Boolean(id);
       const url = isUpdate
-        ? `http://localhost:5000/api/listMindmap/${id}`
-        : 'http://localhost:5000/api/listMindmap';
+        ? `/api/listMindmap/${id}`
+        : '/api/listMindmap';
       const method = isUpdate ? 'PUT' : 'POST';
 
       this.loading = true;

@@ -85,7 +85,7 @@ export default {
         }
 
         // 2. Gọi API chung
-        const res = await fetch("http://localhost:5000/api/listMindmap/Listmm", {
+        const res = await fetch("/api/listMindmap/Listmm", {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -143,7 +143,7 @@ export default {
           if (!token) throw new Error('Chưa đăng nhập hệ thống');
         }
         const res = await fetch(
-          `http://localhost:5000/api/listMindmap/${id}`,
+          `/api/listMindmap/${id}`,
           {
             method: "DELETE",
             headers: { Authorization: `Bearer ${token}` }
