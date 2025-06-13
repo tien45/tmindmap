@@ -136,6 +136,7 @@ export default {
             provider: 'google'
           })
         });
+        console.log(res)
         // Update reactive authState
         authState.token = localStorage.getItem('token');
         authState.userName = localStorage.getItem('userName');
